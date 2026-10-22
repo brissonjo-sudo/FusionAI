@@ -83,6 +83,7 @@ type
     FDefaultProviderId: string;
     FEnableFileLog: Boolean;
     FLogDirectory: string;
+    FSecretLoadWarning: string;
 
     FTaskList: TList<string>;
     FDockableFormPointer: TDockableForm;
@@ -97,6 +98,7 @@ type
     procedure LoadDefaultQuestions;
     function IsMultiAI: Boolean;
     function GetProviderEnabledCount: Integer;
+    function ReadSecretValue(const AStoredValue, ALabel: string): string;
 
   public
     destructor Destroy; override;
@@ -163,6 +165,8 @@ type
     property DefaultProviderId: string read FDefaultProviderId write FDefaultProviderId;
     property EnableFileLog: Boolean read FEnableFileLog write FEnableFileLog;
     property LogDirectory: string read FLogDirectory write FLogDirectory;
+    // Names of saved secrets that could not be decrypted by the last ReadRegistry.
+    property SecretLoadWarning: string read FSecretLoadWarning;
 
     property MultiAI: Boolean read IsMultiAI;
     property TaskList: TList<string> read FTaskList write FTaskList;
@@ -744,12 +748,26 @@ begin
   LoadDefaultQuestions;
 end;
 
+function TSingletonSettingObj.ReadSecretValue(const AStoredValue, ALabel: string): string;
+begin
+  // One unreadable secret must not reset every other setting.
+  try
+    Result := UnprotectSecret(AStoredValue);
+  except
+    Result := '';
+    if FSecretLoadWarning <> '' then
+      FSecretLoadWarning := FSecretLoadWarning + ', ';
+    FSecretLoadWarning := FSecretLoadWarning + ALabel;
+  end;
+end;
+
 procedure TSingletonSettingObj.ReadRegistry;
 var
   LvRegKey: TRegistry;
   I: Integer;
 begin
   LoadDefaults;
+  FSecretLoadWarning := '';
 
   LvRegKey := TRegistry.Create;
   try
@@ -762,7 +780,7 @@ begin
         if OpenKey(CRegistryRoot, False) or OpenKey(CLegacyRegistryRoot, False) then
         begin
           if ValueExists('ChatGPTApiKey') then
-            FApiKey := UnprotectSecret(ReadString('ChatGPTApiKey'));
+            FApiKey := ReadSecretValue(ReadString('ChatGPTApiKey'), 'ChatGPT API key');
 
           if ValueExists('ChatGPTURL') then
             FURL := IfThen(ReadString('ChatGPTURL').IsEmpty, DefaultChatGPTBaseURL, ReadString('ChatGPTURL'))
@@ -833,7 +851,7 @@ begin
             FProxySetting.ProxyUsername := '';
 
           if ValueExists('ChatGPTProxyPassword') then
-            FProxySetting.ProxyPassword := UnprotectSecret(ReadString('ChatGPTProxyPassword'))
+            FProxySetting.ProxyPassword := ReadSecretValue(ReadString('ChatGPTProxyPassword'), 'proxy password')
           else
             FProxySetting.ProxyPassword := '';
 
@@ -888,8 +906,9 @@ begin
 
         if OpenKey(CProvidersRegistryRoot + '\Gemini', False) or OpenKey(CLegacyProvidersRegistryRoot + '\Gemini', False) then
         begin
-          FEnableGemini := ReadBool('Enabled');
-          FGeminiAPIKey := UnprotectSecret(ReadString('ApiKey'));
+          if ValueExists('Enabled') then
+            FEnableGemini := ReadBool('Enabled');
+          FGeminiAPIKey := ReadSecretValue(ReadString('ApiKey'), 'Gemini API key');
           FGeminiBaseURL := IfThen(ReadString('BaseURL').IsEmpty, DefaultGeminiBaseURL, ReadString('BaseURL'));
           FGeminiModel := IfThen(ReadString('DefaultModel').IsEmpty, DefaultGeminiModel, ReadString('DefaultModel'));
           FGeminiMaxTokens := StrToIntDef(ReadString('MaxTokens'), 0);
@@ -900,8 +919,9 @@ begin
 
         if OpenKey(CProvidersRegistryRoot + '\Claude', False) or OpenKey(CLegacyProvidersRegistryRoot + '\Claude', False) then
         begin
-          FEnableClaude := ReadBool('Enabled');
-          FClaudeAPIKey := UnprotectSecret(ReadString('ApiKey'));
+          if ValueExists('Enabled') then
+            FEnableClaude := ReadBool('Enabled');
+          FClaudeAPIKey := ReadSecretValue(ReadString('ApiKey'), 'Claude API key');
           FClaudeBaseURL := IfThen(ReadString('BaseURL').IsEmpty, DefaultClaudeBaseURL, ReadString('BaseURL'));
           FClaudeModel := IfThen(ReadString('DefaultModel').IsEmpty, DefaultClaudeModel, ReadString('DefaultModel'));
           FClaudeMaxTokens := StrToIntDef(ReadString('MaxTokens'), 0);
@@ -912,8 +932,9 @@ begin
 
         if OpenKey(CProvidersRegistryRoot + '\Ollama', False) or OpenKey(CLegacyProvidersRegistryRoot + '\Ollama', False) then
         begin
-          FEnableOllama := ReadBool('Enabled');
-          FOllamaAPIKey := UnprotectSecret(ReadString('ApiKey'));
+          if ValueExists('Enabled') then
+            FEnableOllama := ReadBool('Enabled');
+          FOllamaAPIKey := ReadSecretValue(ReadString('ApiKey'), 'Ollama API key');
           FOllamaBaseURL := IfThen(ReadString('BaseURL').IsEmpty, DefaultOllamaBaseURL, ReadString('BaseURL'));
           FOllamaModel := IfThen(ReadString('DefaultModel').IsEmpty, DefaultOllamaModel, ReadString('DefaultModel'));
           FOllamaMaxTokens := StrToIntDef(ReadString('MaxTokens'), 0);
@@ -2057,6 +2078,11 @@ procedure TFrm_Setting.LoadFromSettings(const ASettings: TSingletonSettingObj);
 begin
   if not Assigned(ASettings) then
     Exit;
+
+  if ASettings.SecretLoadWarning <> '' then
+    ShowMessage('FusionAI could not decrypt these saved values with the current Windows user profile: ' +
+      ASettings.SecretLoadWarning + '. They were left empty; other settings were kept. ' +
+      'Enter them again and click Save.');
 
   Edt_ApiKey.Text := ASettings.ApiKey;
   Edt_Url.Text := ASettings.URL;

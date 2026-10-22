@@ -104,7 +104,7 @@ changer manuellement un ancien modèle retiré dans les réglages.
 | F12 — cache fragile | Types JSON contrôlés, cache invalide ignoré, remplacement atomique du fichier. Échec de sauvegarde du cache non bloquant. |
 | F13 — mauvais prompt dans l'historique | Prompt capturé dans la réponse, utilisé pour l'enregistrement. |
 | F14 — section critique non libérée | `try/finally` dans `EditorViewActivated`. |
-| F15 — secrets en clair dans le registre | DPAPI Windows à la sauvegarde ; champs masqués. Lire la limite de migration ci-dessous. |
+| F15 — secrets en clair dans le registre | DPAPI Windows à la sauvegarde ; champs masqués. Une valeur non déchiffrable est vidée et signalée, sans remettre les autres réglages à zéro. Lire la limite de migration ci-dessous. |
 | F16 — clé Ollama ignorée | En-tête Bearer optionnel pour génération et listing ; URL normalisée avec/sans `/api`. |
 
 L'historique passe au schéma 3 dans une transaction. Le remplissage des anciennes
@@ -122,7 +122,9 @@ Le nombre de workers conservés est limité pour éviter une accumulation de ret
 Les secrets sont chiffrés pour l'utilisateur Windows courant lors du prochain **Save**.
 Les anciennes valeurs en clair restent lisibles pour la migration ; une copie dans
 l'ancienne racine `HKCU\SOFTWARE\ChatGPTWizard` ou une sauvegarde n'est pas effacée.
-Ne pas réutiliser cette configuration chiffrée avec un autre profil Windows. DPAPI
+Ne pas réutiliser cette configuration chiffrée avec un autre profil Windows : une
+valeur illisible est laissée vide, les réglages s'ouvrent avec un avertissement qui la
+nomme, et le **Save** suivant la remplace. Il faut alors la ressaisir. DPAPI
 ne protège pas contre un programme exécuté avec les mêmes droits utilisateur.
 L'historique et les journaux restent des fichiers locaux non chiffrés contenant du
 code et des prompts lorsque ces fonctions sont activées.
