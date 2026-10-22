@@ -1092,13 +1092,23 @@ begin
   end
   else
     LRow := LView.CursorPos.Line;
-  LView.Position.Move(LRow, 1);
-  LView.Position.MoveEOL;
-  LPosition := EditPosToLinePos(OTAEditPos(LView.Position.Column, LView.Position.Row), LView);
-  // The line's own break follows the insertion point, so drop the trailing one.
   LText := AText;
-  if EndsText(sLineBreak, LText) then
-    SetLength(LText, Length(LText) - Length(sLineBreak));
+  if LRow < LView.Buffer.GetLinesInBuffer then
+  begin
+    // Column 1 of the next line maps to a line start, whatever the encoding of the line.
+    LPosition := EditPosToLinePos(OTAEditPos(1, LRow + 1), LView);
+    if StartsText(sLineBreak, LText) then
+      Delete(LText, 1, Length(sLineBreak));
+  end
+  else
+  begin
+    // Last line: insert at its end; the leading break opens the comment block.
+    LView.Position.Move(LRow, 1);
+    LView.Position.MoveEOL;
+    LPosition := EditPosToLinePos(OTAEditPos(LView.Position.Column, LView.Position.Row), LView);
+    if EndsText(sLineBreak, LText) then
+      SetLength(LText, Length(LText) - Length(sLineBreak));
+  end;
   InsertTextIntoEditorAtPos(LText, LPosition, LView.Buffer);
   LView.CursorPos := LinePosToEditPos(LPosition + Length(UTF8Encode(LText)), LView);
   LView.Block.BeginBlock;
