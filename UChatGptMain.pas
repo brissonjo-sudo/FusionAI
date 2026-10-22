@@ -1073,6 +1073,8 @@ class procedure TEditNotifierHelper.WriteIntoEditor(AText: string);
 var
   LView: IOTAEditView;
   LPosition: Integer;
+  LRow: Integer;
+  LText: string;
 begin
   LView := GetTopMostEditView;
   if not Assigned(LView) then
@@ -1080,12 +1082,25 @@ begin
     ShowAssistantMessage('The source editor is no longer available. No text was inserted.');
     Exit;
   end;
+  // Insert after the end of the target line, never in the middle of it: the comment
+  // block starts with a line break, so mid-line text would be pushed out as code.
   if LView.Block.IsValid and (LView.Block.Size > 0) then
-    LPosition := EditPosToLinePos(OTAEditPos(LView.Block.EndingColumn, LView.Block.EndingRow), LView)
+  begin
+    LRow := LView.Block.EndingRow;
+    if (LView.Block.EndingColumn <= 1) and (LRow > LView.Block.StartingRow) then
+      Dec(LRow); // whole-line selection ends at column 1 of the next line
+  end
   else
-    LPosition := EditPosToLinePos(LView.CursorPos, LView);
-  InsertTextIntoEditorAtPos(AText, LPosition, LView.Buffer);
-  LView.CursorPos := LinePosToEditPos(LPosition + Length(UTF8Encode(AText)), LView);
+    LRow := LView.CursorPos.Line;
+  LView.Position.Move(LRow, 1);
+  LView.Position.MoveEOL;
+  LPosition := EditPosToLinePos(OTAEditPos(LView.Position.Column, LView.Position.Row), LView);
+  // The line's own break follows the insertion point, so drop the trailing one.
+  LText := AText;
+  if EndsText(sLineBreak, LText) then
+    SetLength(LText, Length(LText) - Length(sLineBreak));
+  InsertTextIntoEditorAtPos(LText, LPosition, LView.Buffer);
+  LView.CursorPos := LinePosToEditPos(LPosition + Length(UTF8Encode(LText)), LView);
   LView.Block.BeginBlock;
   LView.Block.EndBlock;
   LView.Paint;
