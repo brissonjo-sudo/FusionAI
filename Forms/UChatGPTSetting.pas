@@ -319,8 +319,8 @@ type
     function ProviderIdToCaption(const AProviderId: string): string;
     function ProviderCaptionToId(const ACaption: string): string;
   public
-    destructor Destroy; override;
     HasChanges: Boolean;
+    destructor Destroy; override;
     procedure AddAllDefinedQuestions;
     procedure LoadFromSettings(const ASettings: TSingletonSettingObj);
   end;
