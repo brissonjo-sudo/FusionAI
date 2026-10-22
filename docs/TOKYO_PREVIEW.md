@@ -96,7 +96,7 @@ changer manuellement un ancien modèle retiré dans les réglages.
 |---|---|
 | F01 — modèles retirés | Nouveaux défauts Gemini/Claude ; configurations existantes conservées. |
 | F02 — paramètres incompatibles | OpenAI classique/reasoning séparés ; sampling omis pour Claude. Les identifiants OpenAI inconnus suivent le profil reasoning : à vérifier pour un endpoint personnalisé. |
-| F03 — réponse qui ferme un commentaire | Prévisualisation et commentaires ligne par ligne ; insertion annulable. |
+| F03 — réponse qui ferme un commentaire | Prévisualisation et commentaires ligne par ligne ; insertion annulable, après la fin de la ligne cible (jamais au milieu d'une ligne). |
 | F04 — threads oubliés après Stop | Requêtes marquées annulées, workers conservés jusqu'à leur fin, résultats obsolètes ignorés, jonction à la destruction. Annulation réseau coopérative seulement. |
 | F05 — blocs Claude perdus | Tous les blocs `text` sont concaténés ; absence de texte signalée. |
 | F06 — pointeur temporaire et EOF | Chaîne source conservée durant la vie du lexer ; gardes de fin de fichier. |
@@ -110,6 +110,20 @@ changer manuellement un ancien modèle retiré dans les réglages.
 | F14 — section critique non libérée | `try/finally` dans `EditorViewActivated`. |
 | F15 — secrets en clair dans le registre | DPAPI Windows à la sauvegarde ; champs masqués. Une valeur non déchiffrable est vidée et signalée, sans remettre les autres réglages à zéro. Lire la limite de migration ci-dessous. |
 | F16 — clé Ollama ignorée | En-tête Bearer optionnel pour génération et listing ; URL normalisée avec/sans `/api`. |
+
+Correctifs issus d'une seconde revue :
+
+| Constat | Traitement |
+|---|---|
+| Onglet History inutilisable | Le `.dfm` ne déclare que 4 champs persistants ; les colonnes ajoutées par le schéma 3 sont créées à l'ouverture à partir des définitions de la requête. |
+| Menus restant dans l'IDE après désinstallation | Les items FusionAI sont retirés du menu contextuel de l'éditeur à la libération du crochet. |
+| Budget de sortie emprunté à ChatGPT | Sans limite propre, Gemini et Ollama laissent le défaut du modèle et Claude utilise 16 000. Les modèles reasoning OpenAI reçoivent au moins 25 000 sur le point d'accès officiel ; un serveur compatible garde la valeur réglée. |
+
+Scénarios IDE associés : ouvrir l'onglet **History** sur une base existante, puis
+filtrer par fournisseur et modèle. Désinstaller le package, faire un clic droit dans
+l'éditeur : aucun item FusionAI ne doit rester. Placer le curseur au milieu d'une
+ligne puis lancer **Add Comments** : la ligne doit rester intacte, les commentaires
+apparaissent dessous.
 
 L'historique passe au schéma 3 dans une transaction. Le remplissage des anciennes
 colonnes se fait une seule fois, au lieu de réécrire toute la table à chaque ouverture.
