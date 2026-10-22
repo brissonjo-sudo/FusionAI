@@ -177,6 +177,7 @@ type
     function MemoForProvider(const AProviderId: string): TMemo;
     function TabForProvider(const AProviderId: string): TTabSheet;
     procedure UpdateHistoryFilterCombos;
+    procedure EnsureHistoryFields;
     procedure RequestTimeoutTimer(Sender: TObject);
     procedure BeginRequestTimeoutWatch;
     procedure EndRequestTimeoutWatch;
@@ -1393,6 +1394,20 @@ begin
   LoadHistory;
 end;
 
+procedure TFram_Question.EnsureHistoryFields;
+var
+  I: Integer;
+begin
+  // The .dfm declares only HID, Question, Answer and Date as persistent fields. With
+  // persistent fields the dataset creates no others, so FieldByName on the newer
+  // columns (provider_display_name, model_id...) would raise. Create the missing ones
+  // from the query's own field definitions, so their types match the result set.
+  FDQryHistory.FieldDefs.Update;
+  for I := 0 to FDQryHistory.FieldDefs.Count - 1 do
+    if FDQryHistory.FindField(FDQryHistory.FieldDefs[I].Name) = nil then
+      FDQryHistory.FieldDefs[I].CreateField(FDQryHistory);
+end;
+
 function TFram_Question.LoadHistory: Boolean;
 begin
   Result := False;
@@ -1420,6 +1435,7 @@ begin
         'COALESCE(batch_id, '''') AS batch_id, ' +
         'COALESCE(request_id, '''') AS request_id ' +
         'FROM TbHistory ORDER BY HID DESC';
+      EnsureHistoryFields;
       FDQryHistory.Open;
       UpdateHistoryFilterCombos;
       Result := True;
