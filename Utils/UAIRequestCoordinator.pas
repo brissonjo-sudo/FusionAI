@@ -156,10 +156,12 @@ begin
   LProviderSetting := LSettings.GetProviderSetting(AProviderId);
   try
     Result.ModelId := LSettings.GetEffectiveModel(AProviderId);
+    // 0 means "provider default": Gemini and Ollama omit the field, Claude uses its own
+    // default. The global value belongs to the ChatGPT section and is no longer borrowed.
     if LProviderSetting.MaxTokens > 0 then
       Result.MaxTokens := LProviderSetting.MaxTokens
     else
-      Result.MaxTokens := LSettings.MaxToken;
+      Result.MaxTokens := 0;
 
     if LProviderSetting.Temperature >= 0 then
       Result.Temperature := LProviderSetting.Temperature

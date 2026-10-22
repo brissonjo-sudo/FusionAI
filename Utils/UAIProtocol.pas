@@ -5,6 +5,13 @@ interface
 uses
   System.SysUtils, System.Classes, System.JSON, System.StrUtils, UAICommon;
 
+const
+  // OpenAI reasoning models count reasoning in max_completion_tokens; OpenAI advises
+  // reserving at least 25,000 tokens. Applied to the official endpoint only.
+  CReasoningMinOutputTokens = 25000;
+  // Claude requires max_tokens; ~16,000 keeps non-streaming responses within HTTP timeouts.
+  CClaudeDefaultMaxTokens = 16000;
+
 function DelphiPrompt(const AText: string): string;
 function BuildOpenAIRequest(const ARequest: TProviderRequest; const ASettings: TAIProviderSetting): TJSONObject;
 function BuildClaudeRequest(const ARequest: TProviderRequest): TJSONObject;
@@ -38,7 +45,16 @@ begin
     begin
       if LClassicModel then
         Result.AddPair('max_tokens', TJSONNumber.Create(ARequest.MaxTokens))
+      else if (ASettings.BaseURL = '') or ContainsText(ASettings.BaseURL, 'api.openai.com') then
+      begin
+        // The shared default (2048) would be spent on reasoning before any visible text.
+        if ARequest.MaxTokens < CReasoningMinOutputTokens then
+          Result.AddPair('max_completion_tokens', TJSONNumber.Create(CReasoningMinOutputTokens))
+        else
+          Result.AddPair('max_completion_tokens', TJSONNumber.Create(ARequest.MaxTokens));
+      end
       else
+        // Custom OpenAI-compatible servers may reject a cap above their model limit.
         Result.AddPair('max_completion_tokens', TJSONNumber.Create(ARequest.MaxTokens));
     end;
     // Reasoning models default to reasoning on. Omit sampling parameters for them,
@@ -68,7 +84,9 @@ begin
     LMessages.AddElement(TJSONObject.Create.AddPair('role', 'user').AddPair('content', DelphiPrompt(ARequest.QuestionText)));
     Result.AddPair('model', ARequest.ModelId);
     LMaxTokens := ARequest.MaxTokens;
-    if LMaxTokens < 128 then
+    if LMaxTokens <= 0 then
+      LMaxTokens := CClaudeDefaultMaxTokens // no Claude-specific limit configured
+    else if LMaxTokens < 128 then
       LMaxTokens := 128;
     Result.AddPair('max_tokens', TJSONNumber.Create(LMaxTokens));
     // Sampling fields are deliberately absent: current Claude models reject them.

@@ -45,12 +45,28 @@ begin
       Check(not Assigned(LJSON.Values['temperature']), 'Reasoning sampling must be omitted');
       Check(not Assigned(LJSON.Values['top_p']), 'Reasoning top_p must be omitted');
       Check(not Assigned(LJSON.Values['max_tokens']), 'Legacy token field must be omitted');
+      Check((LJSON.Values['max_completion_tokens'] as TJSONNumber).AsInt = CReasoningMinOutputTokens,
+        'Reasoning budget below the OpenAI reserve');
     finally LJSON.Free end;
+    LSettings.BaseURL := 'http://127.0.0.1:8000/v1';
+    LJSON := BuildOpenAIRequest(LRequest, LSettings);
+    try
+      Check((LJSON.Values['max_completion_tokens'] as TJSONNumber).AsInt = 2048,
+        'Custom endpoint budget must stay as configured');
+    finally LJSON.Free end;
+    LSettings.BaseURL := '';
     LJSON := BuildClaudeRequest(LRequest);
     try
       Check(not Assigned(LJSON.Values['temperature']), 'Claude temperature must be omitted');
       Check(not Assigned(LJSON.Values['top_p']), 'Claude top_p must be omitted');
     finally LJSON.Free end;
+    LRequest.MaxTokens := 0;
+    LJSON := BuildClaudeRequest(LRequest);
+    try
+      Check((LJSON.Values['max_tokens'] as TJSONNumber).AsInt = CClaudeDefaultMaxTokens,
+        'Claude default budget missing');
+    finally LJSON.Free end;
+    LRequest.MaxTokens := 2048;
     LSettings.ProxySetting.Active := True;
     LSettings.ProxySetting.ProxyHost := 'proxy.test';
     LSettings.TimeoutSeconds := 60;
