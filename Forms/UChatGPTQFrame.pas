@@ -393,8 +393,8 @@ begin
   if MessageDlg('Are you sure you want to clear all history items?', TMsgDlgType.mtWarning, [mbYes, mbNo], 0, mbNo) = mrYes then
   begin
     FDConnection.ExecSQL('Delete from TbHistory');
-    FDQryHistory.Close;
-    FDQryHistory.Open;
+    // Same path as the first load: field rebuild and error handling included.
+    LoadHistory;
     mmoHistoryDetail.Clear;
     FCellCloseBtn.Parent := Self;
   end;
@@ -1402,6 +1402,12 @@ begin
   // persistent fields the dataset creates no others, so FieldByName on the newer
   // columns (provider_display_name, model_id...) would raise. Create the missing ones
   // from the query's own field definitions, so their types match the result set.
+  // SQLite reports computed columns by their data, so rebuild these fields on every
+  // load instead of keeping types from an earlier result. Design-time fields are owned
+  // by the frame; the ones created here are owned by the dataset.
+  for I := FDQryHistory.Fields.Count - 1 downto 0 do
+    if FDQryHistory.Fields[I].Owner = FDQryHistory then
+      FDQryHistory.Fields[I].Free;
   FDQryHistory.FieldDefs.Update;
   for I := 0 to FDQryHistory.FieldDefs.Count - 1 do
     if FDQryHistory.FindField(FDQryHistory.FieldDefs[I].Name) = nil then
