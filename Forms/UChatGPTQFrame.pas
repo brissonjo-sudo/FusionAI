@@ -184,6 +184,7 @@ type
     function TryGetSelectedClassSource(out AClassName, AClassSource: string; ASilent: Boolean = False): Boolean;
     procedure ShowClassSelectionUnavailable;
   public
+    destructor Destroy; override;
     procedure InitialFrame;
     procedure InitialClassViewMenueItems(AClassList: TClassList);
     procedure ReloadClassList(AClassList: TClassList);
@@ -210,6 +211,17 @@ const
   CaptionProviderClaude = 'Claude';
   CaptionProviderOllama = 'Ollama';
   CaptionProviderChatGPT = 'ChatGPT';
+
+destructor TFram_Question.Destroy;
+begin
+  if Assigned(FRequestTimer) then FRequestTimer.Enabled := False;
+  if Assigned(FClassTreeView) then FClassTreeView.OnChange := nil;
+  if Assigned(pgcMain) then pgcMain.OnChange := nil;
+  FreeAndNil(FCoordinator);
+  FProviderTabs.Free;
+  FProviderMemos.Free;
+  inherited;
+end;
 
 procedure TFram_Question.AddToHistory(const AQuestion: string; const AResponse: TProviderResponse);
 begin
@@ -316,21 +328,29 @@ begin
 
   if Assigned(FCoordinator) then
     FCoordinator.TargetHandle := Handle;
-  ClearAnswers;
-  Btn_Ask.Enabled := False;
-  if Assigned(FBtnStop) then
-    FBtnStop.Enabled := True;
-  ActivityIndicator1.Visible := True;
-  BeginRequestTimeoutWatch;
-  if AIsClassView then
-  begin
-    FClassViewIsBusy := True;
-    FCoordinator.StartSingleProvider(TSingletonSettingObj.Instance.GetPrimaryProviderId, APrompt, 'CLS');
-  end
-  else
-  begin
-    FClassViewIsBusy := False;
-    FCoordinator.StartPromptBatch(APrompt, 'ASK', GetActiveProviderId);
+  try
+    ClearAnswers;
+    Btn_Ask.Enabled := False;
+    if Assigned(FBtnStop) then
+      FBtnStop.Enabled := True;
+    ActivityIndicator1.Visible := True;
+    BeginRequestTimeoutWatch;
+    if AIsClassView then
+    begin
+      FClassViewIsBusy := True;
+      FCoordinator.StartSingleProvider(TSingletonSettingObj.Instance.GetPrimaryProviderId, APrompt, 'CLS');
+    end
+    else
+    begin
+      FClassViewIsBusy := False;
+      FCoordinator.StartPromptBatch(APrompt, 'ASK', GetActiveProviderId);
+    end;
+  except
+    on E: Exception do
+    begin
+      TerminateAll;
+      ShowIDEMessage(E.Message);
+    end;
   end;
 end;
 
@@ -1147,11 +1167,9 @@ var
   LResponse: TProviderResponse;
   LMemo: TMemo;
 begin
-  if csDestroying in ComponentState then
-    Exit;
-
   LPayload := TProviderMessagePayload(Msg.WParam);
   try
+    if csDestroying in ComponentState then Exit;
     if not Assigned(LPayload) then
       Exit;
 
@@ -1193,7 +1211,7 @@ begin
             end;
           end;
 
-          AddToHistory(IfThen(SameText(LResponse.QuestionLabel, 'CLS'), FLastQuestion, mmoQuestion.Lines.Text), LResponse);
+          AddToHistory(LResponse.QuestionText, LResponse);
         end;
 
       pmBatchCompleted:
@@ -1461,6 +1479,7 @@ end;
 function TFram_Question.TryGetSelectedClassSource(out AClassName, AClassSource: string; ASilent: Boolean): Boolean;
 var
   LLines: TStringList;
+  LLexer: TcpLexer;
 begin
   Result := False;
   AClassName := '';
@@ -1481,6 +1500,17 @@ begin
   end;
 
   AClassName := FClassTreeView.Selected.Text;
+  if not ASilent then
+  begin
+    // Capture the latest unsaved buffer when an action is invoked, even if the
+    // Class View has stayed open while the user edited this unit.
+    LLexer := TcpLexer.Create(FClassList);
+    try
+      LLexer.Reload;
+    finally
+      LLexer.Free;
+    end;
+  end;
   if not FClassList.TryGetValue(AClassName, LLines) or (not Assigned(LLines)) then
   begin
     if not ASilent then
@@ -1518,7 +1548,7 @@ var
   LMessage: string;
 begin
   if TSingletonSettingObj.Instance.TimeOut > 0 then
-    LMessage := Format(CProgressTimeoutFmt, [Max(CMinRequestTimeoutSeconds, TSingletonSettingObj.Instance.TimeOut)])
+    LMessage := Format(CProgressTimeoutFmt, [EnsureRange(TSingletonSettingObj.Instance.TimeOut, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds)])
   else
     LMessage := Format(CProgressTimeoutFmt, [CDefaultRequestTimeoutSeconds]);
   if FClassViewIsBusy then
@@ -1540,7 +1570,7 @@ begin
   end;
 
   if TSingletonSettingObj.Instance.TimeOut > 0 then
-    LTimeoutSeconds := Max(CMinRequestTimeoutSeconds, TSingletonSettingObj.Instance.TimeOut)
+    LTimeoutSeconds := EnsureRange(TSingletonSettingObj.Instance.TimeOut, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds)
   else
     LTimeoutSeconds := CDefaultRequestTimeoutSeconds;
   LElapsedSeconds := SecondsBetween(Now, FRequestStartedAt);

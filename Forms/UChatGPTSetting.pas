@@ -294,6 +294,10 @@ type
     FLbEdtLogDirectory: TLabeledEdit;
     FBtnLogPathBuilder: TButton;
     FGrpLogging: TGroupBox;
+    FModelRefresh: TThread;
+    FModelRefreshTimer: TTimer;
+    FModelRefreshCombo: TComboBox;
+    procedure PollModelRefresh(Sender: TObject);
     procedure AddQuestion(AQuestionpair: TQuestionPair = nil);
     procedure RemoveLatestQuestion;
     procedure ClearGridPanel;
@@ -315,6 +319,7 @@ type
     function ProviderIdToCaption(const AProviderId: string): string;
     function ProviderCaptionToId(const ACaption: string): string;
   public
+    destructor Destroy; override;
     HasChanges: Boolean;
     procedure AddAllDefinedQuestions;
     procedure LoadFromSettings(const ASettings: TSingletonSettingObj);
@@ -326,7 +331,7 @@ var
 
 implementation
 uses
-  UChatGptMain, UAIProviders;
+  UChatGptMain, UAIProviders, UAISecrets;
 
 {$R *.dfm}
 
@@ -384,10 +389,98 @@ begin
   Result := FHistoryPath + '\History.sdb';
 end;
 
+type
+  TModelRefreshThread = class(TThread)
+  private
+    FProvider: IAIProvider;
+    FSettings: TAIProviderSetting;
+    FModels: TModelDescriptorList;
+    FError: string;
+  protected
+    procedure Execute; override;
+  public
+    constructor Create(const AProvider: IAIProvider; ASettings: TAIProviderSetting);
+    destructor Destroy; override;
+  end;
+
+constructor TModelRefreshThread.Create(const AProvider: IAIProvider; ASettings: TAIProviderSetting);
+begin
+  inherited Create(True);
+  FreeOnTerminate := False;
+  FProvider := AProvider;
+  FSettings := ASettings;
+end;
+
+destructor TModelRefreshThread.Destroy;
+begin
+  FModels.Free;
+  FSettings.Free;
+  inherited;
+end;
+
+procedure TModelRefreshThread.Execute;
+begin
+  try
+    if Terminated then Exit;
+    FModels := TModelCatalogService.Instance.RefreshModels(FProvider, FSettings, FError);
+  except
+    on E: Exception do FError := E.Message;
+  end;
+end;
+
+destructor TFrm_Setting.Destroy;
+begin
+  if Assigned(FModelRefreshTimer) then FModelRefreshTimer.Enabled := False;
+  if Assigned(FModelRefresh) then
+  begin
+    FModelRefresh.Terminate;
+    FModelRefresh.WaitFor; // no worker callback into this form
+    FreeAndNil(FModelRefresh);
+  end;
+  inherited;
+end;
+
+procedure TFrm_Setting.PollModelRefresh(Sender: TObject);
+var
+  LWorker: TModelRefreshThread;
+  LModel: TModelDescriptor;
+  LSelected: string;
+begin
+  if not Assigned(FModelRefresh) or (WaitForSingleObject(FModelRefresh.Handle, 0) <> WAIT_OBJECT_0) then Exit;
+  FModelRefreshTimer.Enabled := False;
+  LWorker := TModelRefreshThread(FModelRefresh);
+  try
+    if not Assigned(LWorker.FModels) then
+    begin
+      ShowIDEMessage('Unable to refresh models.' + sLineBreak + LWorker.FError);
+      Exit;
+    end;
+    LSelected := FModelRefreshCombo.Text;
+    FModelRefreshCombo.Items.BeginUpdate;
+    try
+      FModelRefreshCombo.Items.Clear;
+      for LModel in LWorker.FModels do FModelRefreshCombo.Items.Add(LModel.ModelId);
+      // Preserve the user's typed/selected model rather than silently picking a new one.
+      if LSelected <> '' then FModelRefreshCombo.Text := LSelected
+      else if FModelRefreshCombo.Items.Count > 0 then
+      begin
+        FModelRefreshCombo.ItemIndex := 0;
+        HasChanges := True;
+      end;
+    finally
+      FModelRefreshCombo.Items.EndUpdate;
+    end;
+  finally
+    FreeAndNil(FModelRefresh);
+  end;
+end;
+
 function TSingletonSettingObj.GetProviderSetting(const AProviderId: string): TAIProviderSetting;
 begin
   Result := TAIProviderSetting.Create;
   Result.ProviderId := AProviderId;
+  Result.ProxySetting.Assign(FProxySetting);
+  Result.TimeoutSeconds := EnsureRange(FTimeOut, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds);
 
   if SameText(AProviderId, ProviderGemini) then
   begin
@@ -617,7 +710,7 @@ begin
   FHistoryPath := '';
   FHighlightColor := clRed;
   FAnimatedLetters := True;
-  FTimeOut := 20;
+  FTimeOut := CDefaultRequestTimeoutSeconds;
   FMainFormLastQuestion := 'Create a class to make a Zip file in Delphi.';
   FEnableChatGPT := True;
   FEnableGemini := False;
@@ -669,7 +762,7 @@ begin
         if OpenKey(CRegistryRoot, False) or OpenKey(CLegacyRegistryRoot, False) then
         begin
           if ValueExists('ChatGPTApiKey') then
-            FApiKey := ReadString('ChatGPTApiKey');
+            FApiKey := UnprotectSecret(ReadString('ChatGPTApiKey'));
 
           if ValueExists('ChatGPTURL') then
             FURL := IfThen(ReadString('ChatGPTURL').IsEmpty, DefaultChatGPTBaseURL, ReadString('ChatGPTURL'))
@@ -740,7 +833,7 @@ begin
             FProxySetting.ProxyUsername := '';
 
           if ValueExists('ChatGPTProxyPassword') then
-            FProxySetting.ProxyPassword := ReadString('ChatGPTProxyPassword')
+            FProxySetting.ProxyPassword := UnprotectSecret(ReadString('ChatGPTProxyPassword'))
           else
             FProxySetting.ProxyPassword := '';
 
@@ -768,7 +861,7 @@ begin
           if ValueExists('ChatGPTTimeOut') then
             FTimeOut := ReadInteger('ChatGPTTimeOut')
           else
-            FTimeOut := 20;
+            FTimeOut := CDefaultRequestTimeoutSeconds;
 
           if ValueExists(CMainFormLastQuestionValueName) then
             FMainFormLastQuestion := ReadString(CMainFormLastQuestionValueName).Trim
@@ -796,7 +889,7 @@ begin
         if OpenKey(CProvidersRegistryRoot + '\Gemini', False) or OpenKey(CLegacyProvidersRegistryRoot + '\Gemini', False) then
         begin
           FEnableGemini := ReadBool('Enabled');
-          FGeminiAPIKey := ReadString('ApiKey');
+          FGeminiAPIKey := UnprotectSecret(ReadString('ApiKey'));
           FGeminiBaseURL := IfThen(ReadString('BaseURL').IsEmpty, DefaultGeminiBaseURL, ReadString('BaseURL'));
           FGeminiModel := IfThen(ReadString('DefaultModel').IsEmpty, DefaultGeminiModel, ReadString('DefaultModel'));
           FGeminiMaxTokens := StrToIntDef(ReadString('MaxTokens'), 0);
@@ -808,7 +901,7 @@ begin
         if OpenKey(CProvidersRegistryRoot + '\Claude', False) or OpenKey(CLegacyProvidersRegistryRoot + '\Claude', False) then
         begin
           FEnableClaude := ReadBool('Enabled');
-          FClaudeAPIKey := ReadString('ApiKey');
+          FClaudeAPIKey := UnprotectSecret(ReadString('ApiKey'));
           FClaudeBaseURL := IfThen(ReadString('BaseURL').IsEmpty, DefaultClaudeBaseURL, ReadString('BaseURL'));
           FClaudeModel := IfThen(ReadString('DefaultModel').IsEmpty, DefaultClaudeModel, ReadString('DefaultModel'));
           FClaudeMaxTokens := StrToIntDef(ReadString('MaxTokens'), 0);
@@ -820,7 +913,7 @@ begin
         if OpenKey(CProvidersRegistryRoot + '\Ollama', False) or OpenKey(CLegacyProvidersRegistryRoot + '\Ollama', False) then
         begin
           FEnableOllama := ReadBool('Enabled');
-          FOllamaAPIKey := ReadString('ApiKey');
+          FOllamaAPIKey := UnprotectSecret(ReadString('ApiKey'));
           FOllamaBaseURL := IfThen(ReadString('BaseURL').IsEmpty, DefaultOllamaBaseURL, ReadString('BaseURL'));
           FOllamaModel := IfThen(ReadString('DefaultModel').IsEmpty, DefaultOllamaModel, ReadString('DefaultModel'));
           FOllamaMaxTokens := StrToIntDef(ReadString('MaxTokens'), 0);
@@ -917,7 +1010,7 @@ begin
       RootKey := HKEY_CURRENT_USER;
       if OpenKey(CRegistryRoot, True) then
       begin
-        WriteString('ChatGPTApiKey', FApiKey);
+        WriteString('ChatGPTApiKey', ProtectSecret(FApiKey));
         WriteString('ChatGPTURL', FURL);
         WriteString('ChatGPTModel', FModel);
         WriteInteger('ChatGPTMaxToken', FMaxToken);
@@ -930,7 +1023,7 @@ begin
         WriteString('ChatGPTProxyHost', FProxySetting.ProxyHost);
         WriteInteger('ChatGPTProxyPort', FProxySetting.ProxyPort);
         WriteString('ChatGPTProxyUsername', FProxySetting.ProxyUsername);
-        WriteString('ChatGPTProxyPassword', FProxySetting.ProxyPassword);
+        WriteString('ChatGPTProxyPassword', ProtectSecret(FProxySetting.ProxyPassword));
         WriteBool('ChatGPTHistoryEnabled', FHistoryEnabled);
         WriteString('ChatGPTHistoryPath', FHistoryPath);
         WriteInteger('ChatGPTHighlightColor', FHighlightColor);
@@ -945,7 +1038,7 @@ begin
         if OpenKey(CProvidersRegistryRoot + '\Gemini', True) then
         begin
           WriteBool('Enabled', FEnableGemini);
-          WriteString('ApiKey', FGeminiAPIKey);
+          WriteString('ApiKey', ProtectSecret(FGeminiAPIKey));
           WriteString('BaseURL', FGeminiBaseURL);
           WriteString('DefaultModel', FGeminiModel);
           WriteString('MaxTokens', FGeminiMaxTokens.ToString);
@@ -957,7 +1050,7 @@ begin
         if OpenKey(CProvidersRegistryRoot + '\Claude', True) then
         begin
           WriteBool('Enabled', FEnableClaude);
-          WriteString('ApiKey', FClaudeAPIKey);
+          WriteString('ApiKey', ProtectSecret(FClaudeAPIKey));
           WriteString('BaseURL', FClaudeBaseURL);
           WriteString('DefaultModel', FClaudeModel);
           WriteString('MaxTokens', FClaudeMaxTokens.ToString);
@@ -969,7 +1062,7 @@ begin
         if OpenKey(CProvidersRegistryRoot + '\Ollama', True) then
         begin
           WriteBool('Enabled', FEnableOllama);
-          WriteString('ApiKey', FOllamaAPIKey);
+          WriteString('ApiKey', ProtectSecret(FOllamaAPIKey));
           WriteString('BaseURL', FOllamaBaseURL);
           WriteString('DefaultModel', FOllamaModel);
           WriteString('MaxTokens', FOllamaMaxTokens.ToString);
@@ -1257,9 +1350,9 @@ begin
   if Assigned(FEdtClaudeMaxTokens) then
     FEdtClaudeMaxTokens.Enabled := chk_Claude.Checked;
   if Assigned(FEdtClaudeTemperature) then
-    FEdtClaudeTemperature.Enabled := chk_Claude.Checked;
+    FEdtClaudeTemperature.Enabled := False;
   if Assigned(FEdtClaudeTopP) then
-    FEdtClaudeTopP.Enabled := chk_Claude.Checked;
+    FEdtClaudeTopP.Enabled := False;
   if Assigned(FEdtClaudeApiVersion) then
     FEdtClaudeApiVersion.Enabled := chk_Claude.Checked;
   RefreshDefaultProviderChoices;
@@ -1651,6 +1744,10 @@ begin
     FEdtClaudeMaxTokens := CreateProviderOptionEdit(pnlClaude, CaptionMaxTokens, 'ClaudeMaxTokens');
     FEdtClaudeTemperature := CreateProviderOptionEdit(pnlClaude, CaptionTemperature, 'ClaudeTemperature');
     FEdtClaudeTopP := CreateProviderOptionEdit(pnlClaude, CaptionTopP, 'ClaudeTopP');
+    FEdtClaudeTemperature.Enabled := False;
+    FEdtClaudeTopP.Enabled := False;
+    FEdtClaudeTemperature.Hint := 'Current Claude requests use provider defaults.';
+    FEdtClaudeTemperature.ShowHint := True;
     FEdtClaudeApiVersion := CreateProviderOptionEdit(pnlClaude, CaptionAnthropicVersion, 'ClaudeApiVersion');
   end;
 
@@ -1678,6 +1775,7 @@ begin
     FLbEdtOllamaAPIKey := TLabeledEdit.Create(Self);
     FLbEdtOllamaAPIKey.Parent := FPnlOllama;
     FLbEdtOllamaAPIKey.EditLabel.Caption := CaptionOllamaAccessKey;
+    FLbEdtOllamaAPIKey.PasswordChar := '*';
 
     FLbEdtOllamaBaseURL := TLabeledEdit.Create(Self);
     FLbEdtOllamaBaseURL.Parent := FPnlOllama;
@@ -1757,11 +1855,13 @@ end;
 procedure TFrm_Setting.RefreshProviderModels(const AProviderId: string; ACombo: TComboBox);
 var
   LSettings: TAIProviderSetting;
-  LModels: TModelDescriptorList;
-  LError: string;
   LProvider: IAIProvider;
-  LItem: TModelDescriptor;
 begin
+  if Assigned(FModelRefresh) then
+  begin
+    ShowIDEMessage('A model refresh is already running.');
+    Exit;
+  end;
   LSettings := TSingletonSettingObj.Instance.GetProviderSetting(AProviderId);
   try
     if SameText(AProviderId, ProviderChatGPT) then
@@ -1824,27 +1924,15 @@ begin
       Exit;
     end;
 
-    LModels := TModelCatalogService.Instance.RefreshModels(LProvider, LSettings, LError);
+    FModelRefreshCombo := ACombo;
+    FModelRefresh := TModelRefreshThread.Create(LProvider, LSettings.Clone);
     try
-      if not Assigned(LModels) then
-      begin
-        ShowIDEMessage('Unable to refresh models.' + sLineBreak + LError);
-        Exit;
-      end;
-
-      ACombo.Items.BeginUpdate;
-      try
-        ACombo.Items.Clear;
-        for LItem in LModels do
-          ACombo.Items.Add(LItem.ModelId);
-        if ACombo.Items.Count > 0 then
-          ACombo.ItemIndex := 0;
-      finally
-        ACombo.Items.EndUpdate;
-      end;
-    finally
-      LModels.Free;
+      FModelRefresh.Start;
+    except
+      FreeAndNil(FModelRefresh);
+      raise;
     end;
+    FModelRefreshTimer.Enabled := True;
   finally
     LSettings.Free;
   end;
@@ -1871,6 +1959,14 @@ end;
 
 procedure TFrm_Setting.FormCreate(Sender: TObject);
 begin
+  FModelRefreshTimer := TTimer.Create(Self);
+  FModelRefreshTimer.Enabled := False;
+  FModelRefreshTimer.Interval := 100;
+  FModelRefreshTimer.OnTimer := PollModelRefresh;
+  edt_ApiKey.PasswordChar := '*';
+  lbEdt_GeminiAPIKey.PasswordChar := '*';
+  lbEdt_ClaudeAPIKey.PasswordChar := '*';
+  lbEdt_ProxyPassword.PasswordChar := '*';
   HasChanges := False;
   GridPanelPredefinedQs.RowCollection.Clear;
   ScrollBox.OnMouseWheel := PredefinedQuestionsMouseWheel;
@@ -2157,9 +2253,27 @@ end;
 
 function TFrm_Setting.ValidateInputs: Boolean;
 var
+  LTimeout, LTokens, LTemperature: Integer;
   LTopP: Double;
 begin
   Result := False;
+  if not TryStrToInt(Trim(lbEdt_Timeout.Text), LTimeout) or
+     (LTimeout < CMinRequestTimeoutSeconds) or (LTimeout > CMaxRequestTimeoutSeconds) then
+  begin
+    ShowMessage('Request timeout must be between 5 and 120 seconds.');
+    Exit;
+  end;
+  if not TryStrToInt(Trim(Edt_MaxToken.Text), LTokens) or (LTokens < 128) then
+  begin
+    ShowMessage('Max tokens must be an integer of at least 128.');
+    Exit;
+  end;
+  if not TryStrToInt(Trim(Edt_Temperature.Text), LTemperature) or
+     (LTemperature < -1) or (LTemperature > 2) then
+  begin
+    ShowMessage('Legacy OpenAI temperature must be -1 (omit), 0, 1 or 2.');
+    Exit;
+  end;
   if chk_History.Checked then
   begin
     if Trim(lbEdt_History.Text).IsEmpty then

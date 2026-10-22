@@ -161,7 +161,7 @@ type
 implementation
 
 uses
-  UChatGPTProgress;
+  UChatGPTProgress, UAIProtocol;
 
 {$REGION 'public methods'}
 procedure register;
@@ -662,8 +662,7 @@ begin
       LvComment := 'Convert to Assembly'
   end;
 
-  Result := CRLF + '{' + LcLeftComment + LvComment + LcRightComment + CRLF +
-    AInput.Text + '}';
+  Result := AsLineComments(AInput.Text, LvComment);
 end;
 
 class procedure TEditNotifierHelper.RunInlineQuestion(AQuestion: string; AMsgType: TMsgType);
@@ -687,7 +686,8 @@ begin
       begin
         if TSingletonSettingObj.Instance.EnableFileLog then
           AppendLogMessage(TSingletonSettingObj.Instance.LogDirectory,
-            'RunInlineQuestion: writing response into editor.');
+            'RunInlineQuestion: previewing response before insertion.');
+        if not PreviewGeneratedText(RefineText(Frm_Progress.Answer, AMsgType)) then Exit;
         WriteIntoEditor(RefineText(Frm_Progress.Answer, AMsgType));
         if TSingletonSettingObj.Instance.EnableFileLog then
           AppendLogMessage(TSingletonSettingObj.Instance.LogDirectory,
@@ -940,20 +940,23 @@ begin
   LvCurrentUnitName := GetCurrentUnitPath;
 
   Cs.Enter;
-  if Assigned(FFusionAIDockForm) and (FFusionAIDockForm.Showing) and (FFusionAIDockForm.Fram_Question.pgcMain.ActivePageIndex = 1) and
-    (not LvCurrentUnitName.Equals(TSingletonSettingObj.Instance.CurrentActiveViewName)) then
-  begin
-    TSingletonSettingObj.Instance.CurrentActiveViewName := LvCurrentUnitName;
-    Cs.Leave;
-
-    if Assigned(FFusionAIDockForm) then
+  try
+    if Assigned(FFusionAIDockForm) and (FFusionAIDockForm.Showing) and (FFusionAIDockForm.Fram_Question.pgcMain.ActivePageIndex = 1) and
+      (not LvCurrentUnitName.Equals(TSingletonSettingObj.Instance.CurrentActiveViewName)) then
     begin
-      with FFusionAIDockForm.Fram_Question do
+      TSingletonSettingObj.Instance.CurrentActiveViewName := LvCurrentUnitName;
+
+      if Assigned(FFusionAIDockForm) then
       begin
-        if (pgcMain.ActivePage = tsClassView) and (not ClassViewIsBusy) then
-          ReloadClassList(FFusionAIDockForm.FDockFormClassListObj);
+        with FFusionAIDockForm.Fram_Question do
+        begin
+          if (pgcMain.ActivePage = tsClassView) and (not ClassViewIsBusy) then
+            ReloadClassList(FFusionAIDockForm.FDockFormClassListObj);
+        end;
       end;
     end;
+  finally
+    Cs.Leave;
   end;
 end;
 
@@ -1068,44 +1071,24 @@ begin
 end;
 class procedure TEditNotifierHelper.WriteIntoEditor(AText: string);
 var
-  LvEditView: IOTAEditView;
-  LvTextLen: Integer;
-  LvStartPos: Integer;
-  LvEndPos: Integer;
-  LvLineNo: Integer;
-  LvCharIndex: Integer;
-  LvLineText: String;
+  LView: IOTAEditView;
+  LPosition: Integer;
 begin
-  if TSingletonSettingObj.Instance.EnableFileLog then
-    AppendLogMessage(TSingletonSettingObj.Instance.LogDirectory,
-      'WriteIntoEditor: entered with text length=' + IntToStr(Length(AText)) + '.');
-  LvEditView := GetTopMostEditView;
-  if IsEditControl(Screen.ActiveControl) and Assigned(LvEditView) then
+  LView := GetTopMostEditView;
+  if not Assigned(LView) then
   begin
-    if LvEditView.Block.IsValid then
-    begin
-      LvStartPos := EditPosToLinePos(OTAEditPos(LvEditView.Block.StartingColumn, LvEditView.Block.StartingRow), LvEditView);
-      LvEndPos := EditPosToLinePos(OTAEditPos(LvEditView.Block.EndingColumn, LvEditView.Block.EndingRow), LvEditView);
-      LvTextLen := LvEditView.Block.Size;
-
-      InsertTextIntoEditorAtPos(AText , LvEndPos, LvEditView.Buffer);
-      LvEditView.CursorPos := LinePosToEditPos(LvStartPos + LvTextLen);
-      LvEditView.Block.BeginBlock;
-      LvEditView.CursorPos := LinePosToEditPos(LvEndPos + LvTextLen);
-      LvEditView.Block.EndBlock;
-
-      LvEditView.Paint;
-    end
-    else
-    begin
-      GetCurrLineText(LvLineText, LvLineNo, LvCharIndex);
-      Inc(LvLineNo);
-      InsertSingleLine(LvLineNo, LvLineText, LvEditView);
-    end;
+    ShowAssistantMessage('The source editor is no longer available. No text was inserted.');
+    Exit;
   end;
-  if TSingletonSettingObj.Instance.EnableFileLog then
-    AppendLogMessage(TSingletonSettingObj.Instance.LogDirectory,
-      'WriteIntoEditor: completed.');
+  if LView.Block.IsValid and (LView.Block.Size > 0) then
+    LPosition := EditPosToLinePos(OTAEditPos(LView.Block.EndingColumn, LView.Block.EndingRow), LView)
+  else
+    LPosition := EditPosToLinePos(LView.CursorPos, LView);
+  InsertTextIntoEditorAtPos(AText, LPosition, LView.Buffer);
+  LView.CursorPos := LinePosToEditPos(LPosition + Length(UTF8Encode(AText)), LView);
+  LView.Block.BeginBlock;
+  LView.Block.EndBlock;
+  LView.Paint;
 end;
 {$ENDREGION}
 
@@ -1128,7 +1111,7 @@ begin
   DeskSection := CAssistantDeskSection;
   AutoSave := True;
   SaveStateNecessary := True;
-  FDockFormClassListObj := TClassList.Create;
+  FDockFormClassListObj := TClassList.Create([doOwnsValues]);
 
   with Self do
   begin
@@ -1166,6 +1149,8 @@ end;
 destructor TChatGPTDockForm.Destroy;
 begin
   SaveStateNecessary := True;
+  // Stop the frame's workers and detach its controls before freeing their model.
+  FreeAndNil(Fram_Question);
   FDockFormClassListObj.Free;
   inherited;
   FFusionAIDockForm := nil;

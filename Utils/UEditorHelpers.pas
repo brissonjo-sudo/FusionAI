@@ -10,7 +10,7 @@ unit UEditorHelpers;
 
 interface
 uses
-  Winapi.Windows, ToolsAPI, System.SysUtils, System.Classes, System.StrUtils, System.IOUtils, Vcl.Dialogs, UConsts;
+  Winapi.Windows, ToolsAPI, System.SysUtils, System.Classes, System.StrUtils, System.IOUtils, Vcl.Dialogs, Vcl.Forms, Vcl.StdCtrls, Vcl.ExtCtrls, Vcl.Controls, UConsts;
 
 const
   EditControlClassName = 'TEditControl';
@@ -22,6 +22,8 @@ const
   function GetSourceEditorFromModule(AModule: IOTAModule; const AFileName: string = ''): IOTASourceEditor;
   function GetCurrentModule: IOTAModule;
   function GetCurrentSourceEditor: IOTASourceEditor;
+  function PreviewGeneratedText(const AText: string): Boolean;
+  function TryReadCurrentSource(out AText: string): Boolean;
   function GetEditWriterForSourceEditor(ASourceEditor: IOTASourceEditor = nil): IOTAEditWriter;
   function ConvertTextToEditorTextW(const AText: string): AnsiString;
   function ConvertEditorTextToTextW(const Text: AnsiString): string;
@@ -45,6 +47,50 @@ var
   GMessageGroup: IOTAMessageGroup;
   GLogLock: TObject;
 
+
+function PreviewGeneratedText(const AText: string): Boolean;
+var
+  LForm: TForm;
+  LMemo: TMemo;
+  LButtons: TPanel;
+  LInsert, LCancel: TButton;
+begin
+  LForm := TForm.CreateNew(Application);
+  try
+    LForm.Caption := 'FusionAI - Review generated response';
+    LForm.Position := poScreenCenter;
+    LForm.Width := 800;
+    LForm.Height := 600;
+    LButtons := TPanel.Create(LForm);
+    LButtons.Parent := LForm;
+    LButtons.Align := alBottom;
+    LButtons.Height := 46;
+    LInsert := TButton.Create(LForm);
+    LInsert.Parent := LButtons;
+    LInsert.SetBounds(12, 10, 150, 27);
+    LInsert.Caption := 'Insert as comments';
+    LInsert.ModalResult := mrOk;
+    LInsert.Default := True;
+    LCancel := TButton.Create(LForm);
+    LCancel.Parent := LButtons;
+    LCancel.SetBounds(174, 10, 100, 27);
+    LCancel.Caption := 'Cancel';
+    LCancel.ModalResult := mrCancel;
+    LCancel.Cancel := True;
+    LMemo := TMemo.Create(LForm);
+    LMemo.Parent := LForm;
+    LMemo.Align := alClient;
+    LMemo.ReadOnly := True;
+    LMemo.WordWrap := False;
+    LMemo.ScrollBars := ssBoth;
+    LMemo.Font.Name := 'Consolas';
+    LMemo.Font.Size := 10;
+    LMemo.Lines.Text := AText;
+    Result := LForm.ShowModal = mrOk;
+  finally
+    LForm.Free;
+  end;
+end;
 
 function QuerySvcs(const AInstance: IUnknown; const AIntf: TGUID; out AInst): Boolean;
 begin
@@ -131,6 +177,32 @@ begin
 
   if Result = nil then
     Result := GetSourceEditorFromModule(GetCurrentModule);
+end;
+
+function TryReadCurrentSource(out AText: string): Boolean;
+var
+  LEditor: IOTASourceEditor;
+  LReader: IOTAEditReader;
+  LBuffer: array[0..4095] of AnsiChar;
+  LBytes, LChunk: AnsiString;
+  LPosition, LRead: Integer;
+begin
+  Result := False;
+  AText := '';
+  LEditor := GetCurrentSourceEditor;
+  if not Assigned(LEditor) then Exit;
+  LReader := LEditor.CreateReader;
+  if not Assigned(LReader) then Exit;
+  LPosition := 0;
+  repeat
+    LRead := LReader.GetText(LPosition, @LBuffer[0], SizeOf(LBuffer));
+    if LRead <= 0 then Break;
+    SetString(LChunk, PAnsiChar(@LBuffer[0]), LRead);
+    LBytes := LBytes + LChunk;
+    Inc(LPosition, LRead);
+  until False;
+  AText := UTF8ToUnicodeString(LBytes);
+  Result := True;
 end;
 
 function GetEditWriterForSourceEditor(ASourceEditor: IOTASourceEditor = nil): IOTAEditWriter;
