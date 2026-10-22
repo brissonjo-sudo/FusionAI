@@ -519,11 +519,12 @@ begin
         Result.ResponseText := Trim(LResponseText);
       end;
 
-      if Result.ResponseText = '' then
-        raise Exception.Create('ChatGPT returned an empty response.');
-
+      // Truncation first: a reasoning model can spend its whole budget and return no text.
       if Assigned(LChoices) and (LChoices.Count > 0) then
         CheckCompletion(JsonString(LChoices.Items[0] as TJSONObject, 'finish_reason'), Result.ResponseText);
+
+      if Result.ResponseText = '' then
+        raise Exception.Create('ChatGPT returned an empty response.');
       Result.Status := prsSucceeded;
       Result.FinishedAt := Now;
       Result.DurationMs := MilliSecondsBetween(Result.FinishedAt, Result.StartedAt);
@@ -1028,6 +1029,8 @@ begin
         raise Exception.Create('Invalid response from Ollama.');
 
       Result.ResponseText := JsonString(LRoot, 'response');
+      // Truncation first, so an exhausted budget is not reported as an empty response.
+      CheckCompletion(JsonString(LRoot, 'done_reason'), Result.ResponseText);
       if Result.ResponseText = '' then
       begin
         Result.ErrorText := ExtractErrorText(LRoot);
@@ -1035,7 +1038,6 @@ begin
           Result.ErrorText := 'Ollama returned no response.';
         raise Exception.Create(Result.ErrorText);
       end;
-      CheckCompletion(JsonString(LRoot, 'done_reason'), Result.ResponseText);
       Result.Status := prsSucceeded;
       Result.FinishedAt := Now;
       Result.DurationMs := MilliSecondsBetween(Result.FinishedAt, Result.StartedAt);

@@ -46,6 +46,13 @@ class FixtureTests(unittest.TestCase):
         self.server.scenario = 'truncated'
         self.assertEqual(self.post('/v1/messages', {})['stop_reason'], 'max_tokens')
 
+    def test_truncated_without_text(self):
+        self.server.scenario = 'truncated_empty'
+        choice = self.post('/v1/chat/completions', {'model': 'o3'})['choices'][0]
+        self.assertEqual((choice['message']['content'], choice['finish_reason']), ('', 'length'))
+        generated = self.post('/api/generate', {})
+        self.assertEqual((generated['response'], generated['done_reason']), ('', 'length'))
+
     def test_http_error(self):
         self.server.scenario = 'error429'
         with self.assertRaises(HTTPError) as caught:

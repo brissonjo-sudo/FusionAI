@@ -16,7 +16,8 @@ fourni.** Les tests Python vérifient uniquement le serveur simulé.
 3. Dans l'invite de commandes **RAD Studio 10.2**, exécuter `tests\build.cmd`.
    Le résultat attendu est `PASS: requests, responses, Pascal masking, comments and Windows DPAPI`.
    Ce programme compile les unités corrigées de protocole, texte et secrets ; il
-   n'éprouve pas l'IDE, le HTTP, le parseur complet ou FireDAC.
+   n'éprouve pas l'IDE, le HTTP, le parseur complet ou FireDAC. **Ce PASS ne garantit
+   pas que le package compile** : l'étape 4 reste indispensable.
 4. Ouvrir `FusionAI.dproj` dans Delphi 10.2, sélectionner **Win32**, puis **Build**.
    Si les métadonnées du projet amont sont refusées, ouvrir `FusionAI.dpk` et laisser
    Delphi créer ses options de projet ; ajouter `Forms`, `Utils` et `Lexer` au chemin
@@ -62,6 +63,7 @@ Relancer le serveur, un scénario à la fois :
 
 ```console
 python tests/mock_provider.py --scenario truncated
+python tests/mock_provider.py --scenario truncated_empty
 python tests/mock_provider.py --scenario error429
 python tests/mock_provider.py --scenario empty
 python tests/mock_provider.py --scenario slow --delay 15
@@ -69,6 +71,8 @@ python tests/mock_provider.py --scenario slow --delay 15
 
 - `truncated` : signaler une réponse incomplète, conserver le texte partiel à examiner,
   ne pas l'insérer automatiquement comme un succès.
+- `truncated_empty` : budget épuisé sans texte (cas d'un modèle reasoning). Les quatre
+  adaptateurs doivent afficher « Incomplete response », jamais « empty response ».
 - `error429` : afficher `HTTP 429` et le message de quota simulé.
 - `empty` : afficher un échec explicite.
 - `slow` : essayer Stop, une nouvelle question, puis fermer le panneau pendant la

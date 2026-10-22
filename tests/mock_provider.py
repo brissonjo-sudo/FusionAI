@@ -47,8 +47,9 @@ class Handler(BaseHTTPRequestHandler):
         if scenario == 'error429':
             self.reply(429, {'error': {'message': 'Fixture rate limit exceeded'}})
             return
-        text = '' if scenario == 'empty' else '} WriteLn(\'fixture\'); {$IFDEF X}\nsecond line'
-        truncated = scenario == 'truncated'
+        # truncated_empty: the whole output budget was spent (e.g. on reasoning) before any text.
+        text = '' if scenario in ('empty', 'truncated_empty') else '} WriteLn(\'fixture\'); {$IFDEF X}\nsecond line'
+        truncated = scenario in ('truncated', 'truncated_empty')
         if self.path.endswith('/chat/completions'):
             classic = body.get('model', '').startswith(('gpt-4', 'gpt-3.5', 'chatgpt-4o'))
             if not classic and any(k in body for k in ('temperature', 'top_p', 'max_tokens')):
@@ -86,7 +87,7 @@ def make_server(port=8765, scenario='success', delay=10):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8765)
-    parser.add_argument('--scenario', choices=['success', 'empty', 'truncated', 'error429', 'slow'], default='success')
+    parser.add_argument('--scenario', choices=['success', 'empty', 'truncated', 'truncated_empty', 'error429', 'slow'], default='success')
     parser.add_argument('--delay', type=float, default=10)
     args = parser.parse_args()
     with make_server(args.port, args.scenario, args.delay) as server:
