@@ -117,7 +117,7 @@ Correctifs issus d'une seconde revue :
 |---|---|
 | Onglet History inutilisable | Le `.dfm` ne déclare que 4 champs persistants ; les colonnes ajoutées par le schéma 3 sont créées à l'ouverture à partir des définitions de la requête. |
 | Menus restant dans l'IDE après désinstallation | Les items FusionAI sont retirés du menu contextuel de l'éditeur à la libération du crochet. |
-| Budget de sortie emprunté à ChatGPT | Sans limite propre, Gemini et Ollama laissent le défaut du modèle et Claude utilise 16 000. Les modèles reasoning OpenAI reçoivent au moins 25 000 sur le point d'accès officiel ; un serveur compatible garde la valeur réglée. |
+| Budget de sortie emprunté à ChatGPT | Sans limite propre, Gemini laisse le défaut du modèle et Claude utilise 16 000 ; Ollama garde la limite commune, son défaut étant sans borne. Sur le point d'accès officiel, un modèle reasoning OpenAI reçoit 25 000 tant que la limite commune vaut son défaut historique (2048) ; une valeur choisie, un modèle `-chat` ou un serveur compatible gardent la valeur réglée. Ce sont des plafonds : le timeout HTTP (60 s par défaut, 120 s au plus) peut couper une très longue réponse avant. |
 
 Scénarios IDE associés : ouvrir l'onglet **History** sur une base existante, puis
 filtrer par fournisseur et modèle. Désinstaller le package, faire un clic droit dans

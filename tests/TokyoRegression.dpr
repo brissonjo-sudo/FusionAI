@@ -48,6 +48,20 @@ begin
       Check((LJSON.Values['max_completion_tokens'] as TJSONNumber).AsInt = CReasoningMinOutputTokens,
         'Reasoning budget below the OpenAI reserve');
     finally LJSON.Free end;
+    LRequest.MaxTokens := 4000;
+    LJSON := BuildOpenAIRequest(LRequest, LSettings);
+    try
+      Check((LJSON.Values['max_completion_tokens'] as TJSONNumber).AsInt = 4000,
+        'Explicit reasoning budget must be kept');
+    finally LJSON.Free end;
+    LRequest.MaxTokens := 2048;
+    LRequest.ModelId := 'gpt-5-chat-latest';
+    LJSON := BuildOpenAIRequest(LRequest, LSettings);
+    try
+      Check((LJSON.Values['max_completion_tokens'] as TJSONNumber).AsInt = 2048,
+        'Chat model must not receive the reasoning reserve');
+    finally LJSON.Free end;
+    LRequest.ModelId := 'o3';
     LSettings.BaseURL := 'http://127.0.0.1:8000/v1';
     LJSON := BuildOpenAIRequest(LRequest, LSettings);
     try

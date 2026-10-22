@@ -7,9 +7,12 @@ uses
 
 const
   // OpenAI reasoning models count reasoning in max_completion_tokens; OpenAI advises
-  // reserving at least 25,000 tokens. Applied to the official endpoint only.
+  // reserving at least 25,000 tokens. Applied on the official endpoint, only when the
+  // shared limit still has its historical default (an explicit choice is kept).
   CReasoningMinOutputTokens = 25000;
-  // Claude requires max_tokens; ~16,000 keeps non-streaming responses within HTTP timeouts.
+  CLegacyDefaultMaxTokens = 2048; // UConsts.DefaultMaxToken, not used here to keep this unit standalone
+  // Claude requires max_tokens. This is a ceiling, not a target; with the plugin's HTTP
+  // timeout (60 s by default, 120 s max) a very long answer can still time out first.
   CClaudeDefaultMaxTokens = 16000;
 
 function DelphiPrompt(const AText: string): string;
@@ -45,16 +48,14 @@ begin
     begin
       if LClassicModel then
         Result.AddPair('max_tokens', TJSONNumber.Create(ARequest.MaxTokens))
-      else if (ASettings.BaseURL = '') or ContainsText(ASettings.BaseURL, 'api.openai.com') then
-      begin
-        // The shared default (2048) would be spent on reasoning before any visible text.
-        if ARequest.MaxTokens < CReasoningMinOutputTokens then
-          Result.AddPair('max_completion_tokens', TJSONNumber.Create(CReasoningMinOutputTokens))
-        else
-          Result.AddPair('max_completion_tokens', TJSONNumber.Create(ARequest.MaxTokens));
-      end
-      else
+      else if (ARequest.MaxTokens = CLegacyDefaultMaxTokens) and
+        ((ASettings.BaseURL = '') or ContainsText(ASettings.BaseURL, 'api.openai.com')) and
+        not ContainsText(ARequest.ModelId, '-chat') then
+        // The untouched default would be spent on reasoning before any visible text.
+        // '-chat' models are not reasoning models and have a lower output limit.
         // Custom OpenAI-compatible servers may reject a cap above their model limit.
+        Result.AddPair('max_completion_tokens', TJSONNumber.Create(CReasoningMinOutputTokens))
+      else
         Result.AddPair('max_completion_tokens', TJSONNumber.Create(ARequest.MaxTokens));
     end;
     // Reasoning models default to reasoning on. Omit sampling parameters for them,
