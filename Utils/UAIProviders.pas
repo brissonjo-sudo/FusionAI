@@ -75,7 +75,14 @@ type
 implementation
 
 uses
-  UEditorHelpers;
+  UEditorHelpers, UAIProtocol, Winapi.Windows;
+
+function CacheString(AObject: TJSONObject; const AName: string): string;
+begin
+  Result := '';
+  if Assigned(AObject) and (AObject.Values[AName] is TJSONString) then
+    Result := AObject.Values[AName].Value;
+end;
 
 type
   TBaseAIProvider = class(TInterfacedObject, IAIProvider)
@@ -89,6 +96,7 @@ type
     function JsonObject(AObject: TJSONObject; const AName: string): TJSONObject;
     function JsonValueText(AValue: TJSONValue): string;
     function ExtractErrorText(AValue: TJSONValue): string;
+    procedure CheckHTTPResponse(const AResponse: IHTTPResponse; const ABody: string);
     procedure LogProviderTrace(const ARequest: TProviderRequest; const AMessage: string);
   public
     function GetId: string; virtual; abstract;
@@ -139,6 +147,9 @@ type
   end;
 
   TOllamaProvider = class(TBaseAIProvider)
+  private
+    function RootURL(const ASettings: TAIProviderSetting): string;
+    function AuthHeaders(const ASettings: TAIProviderSetting): TNetHeaders;
   public
     function GetId: string; override;
     function GetDisplayName: string; override;
@@ -154,13 +165,16 @@ function TBaseAIProvider.CreateClient(const ARequest: TProviderRequest): THTTPCl
 var
   LTimeoutSeconds: Integer;
 begin
+  if ARequest.IsCancelled then raise EAbort.Create(CProgressCancelled);
   Result := THTTPClient.Create;
   if ARequest.TimeoutSeconds > 0 then
     LTimeoutSeconds := Max(CMinRequestTimeoutSeconds, ARequest.TimeoutSeconds)
   else
     LTimeoutSeconds := CDefaultRequestTimeoutSeconds;
 
-  Result.ConnectionTimeout := LTimeoutSeconds * 1000;
+  LTimeoutSeconds := EnsureRange(LTimeoutSeconds, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds);
+  Result.OnReceiveData := ARequest.ReceiveData;
+  Result.ConnectionTimeout := Min(10, LTimeoutSeconds) * 1000;
   Result.ResponseTimeout := LTimeoutSeconds * 1000;
 
   if Assigned(ARequest.ProxySetting) and ARequest.ProxySetting.Active and (ARequest.ProxySetting.ProxyHost <> '') then
@@ -187,6 +201,8 @@ begin
     try
       LResponse := LClient.Get(AURL);
       Result := LResponse.ContentAsString(TEncoding.UTF8);
+      if ARequest.IsCancelled then raise EAbort.Create(CProgressCancelled);
+      CheckHTTPResponse(LResponse, Result);
       LogProviderTrace(ARequest, 'RESPONSE ' + IntToStr(LResponse.StatusCode) + sLineBreak + Result);
     except
       on E: Exception do
@@ -220,6 +236,8 @@ begin
     try
       LResponse := LClient.Post(AURL, LBodyStream);
       Result := LResponse.ContentAsString(TEncoding.UTF8);
+      if ARequest.IsCancelled then raise EAbort.Create(CProgressCancelled);
+      CheckHTTPResponse(LResponse, Result);
       LogProviderTrace(ARequest, 'RESPONSE ' + IntToStr(LResponse.StatusCode) + sLineBreak + Result);
     except
       on E: Exception do
@@ -364,6 +382,22 @@ begin
   end;
 end;
 
+procedure TBaseAIProvider.CheckHTTPResponse(const AResponse: IHTTPResponse; const ABody: string);
+var
+  LJSON: TJSONValue;
+  LError: string;
+begin
+  if (AResponse.StatusCode >= 200) and (AResponse.StatusCode < 300) then Exit;
+  LJSON := TJSONObject.ParseJSONValue(ABody);
+  try
+    LError := ExtractErrorText(LJSON);
+  finally
+    LJSON.Free;
+  end;
+  if LError = '' then LError := 'The endpoint returned no JSON error details.';
+  raise Exception.CreateFmt('HTTP %d: %s', [AResponse.StatusCode, LError]);
+end;
+
 procedure TBaseAIProvider.LogProviderTrace(const ARequest: TProviderRequest; const AMessage: string);
 begin
   if Assigned(ARequest) and ARequest.LogEnabled then
@@ -421,15 +455,11 @@ function TChatGPTProvider.Execute(const ARequest: TProviderRequest; const ASetti
 var
   LUrl: string;
   LBody: TJSONObject;
-  LMessages: TJSONArray;
-  LMessage: TJSONObject;
   LRoot: TJSONObject;
   LChoices: TJSONArray;
   LChoice: TJSONObject;
   LChoiceMessage: TJSONObject;
   LResponseText: string;
-  LTokenFieldName: string;
-  LIsReasoningModel: Boolean;
 begin
   Result := TProviderResponse.Create;
   Result.RequestId := ARequest.RequestId;
@@ -442,38 +472,8 @@ begin
   Result.StartedAt := Now;
   Result.Status := prsRunning;
 
-  LBody := TJSONObject.Create;
+  LBody := BuildOpenAIRequest(ARequest, ASettings);
   try
-    LMessages := TJSONArray.Create;
-    LMessage := TJSONObject.Create;
-    LMessage.AddPair('role', 'user');
-    LMessage.AddPair('content', ARequest.QuestionText);
-    LMessages.AddElement(LMessage);
-
-    LBody.AddPair('model', ARequest.ModelId);
-    LBody.AddPair('messages', LMessages);
-    LIsReasoningModel := StartsText('gpt-5', Trim(ARequest.ModelId)) or StartsText('o', Trim(ARequest.ModelId));
-
-    if ARequest.MaxTokens > 0 then
-    begin
-      if LIsReasoningModel then
-        LTokenFieldName := 'max_completion_tokens'
-      else
-        LTokenFieldName := 'max_tokens';
-      LBody.AddPair(LTokenFieldName, TJSONNumber.Create(ARequest.MaxTokens));
-    end;
-    if ARequest.Temperature >= 0 then
-    begin
-      if LIsReasoningModel and (ARequest.Temperature <= 0) then
-      begin
-        // GPT-5/o-series models reject an explicit zero temperature and work with their default.
-      end
-      else
-        LBody.AddPair('temperature', TJSONNumber.Create(ARequest.Temperature));
-    end;
-    if (ASettings.TopP > 0) and (not LIsReasoningModel) then
-      LBody.AddPair('top_p', TJSONNumber.Create(ASettings.TopP));
-
     LUrl := NormalizeRootURL(ASettings.BaseURL) + '/chat/completions';
     LRoot := TJSONObject.ParseJSONValue(ExecutePost(
       LUrl,
@@ -519,9 +519,12 @@ begin
         Result.ResponseText := Trim(LResponseText);
       end;
 
+      // Truncation first: a reasoning model can spend its whole budget and return no text.
+      if Assigned(LChoices) and (LChoices.Count > 0) then
+        CheckCompletion(JsonString(LChoices.Items[0] as TJSONObject, 'finish_reason'), Result.ResponseText);
+
       if Result.ResponseText = '' then
         raise Exception.Create('ChatGPT returned an empty response.');
-
       Result.Status := prsSucceeded;
       Result.FinishedAt := Now;
       Result.DurationMs := MilliSecondsBetween(Result.FinishedAt, Result.StartedAt);
@@ -580,7 +583,8 @@ begin
   AModels := TModelDescriptorList.Create(True);
   LRequest := TProviderRequest.Create;
   try
-    LRequest.TimeoutSeconds := 20;
+    LRequest.TimeoutSeconds := Min(20, Max(CMinRequestTimeoutSeconds, ASettings.TimeoutSeconds));
+    LRequest.ProxySetting.Assign(ASettings.ProxySetting);
     LRoot := TJSONObject.ParseJSONValue(ExecuteGet(
       NormalizeRootURL(ASettings.BaseURL) + '/models',
       [TNameValuePair.Create('Authorization', 'Bearer ' + ASettings.ApiKey)],
@@ -659,7 +663,7 @@ begin
     LContents := TJSONArray.Create;
     LContent := TJSONObject.Create;
     LParts := TJSONArray.Create;
-    LParts.AddElement(TJSONObject.Create.AddPair('text', ARequest.QuestionText));
+    LParts.AddElement(TJSONObject.Create.AddPair('text', DelphiPrompt(ARequest.QuestionText)));
     LContent.AddPair('parts', LParts);
     LContents.AddElement(LContent);
     LBody.AddPair('contents', LContents);
@@ -698,12 +702,15 @@ begin
       end;
 
       LCandidate := LCandidates.Items[0] as TJSONObject;
-      LResponseContent := LCandidate.Values['content'] as TJSONObject;
+      LResponseContent := JsonObject(LCandidate, 'content');
       LResponseParts := JsonArray(LResponseContent, 'parts');
       if Assigned(LResponseParts) then
         for I := 0 to LResponseParts.Count - 1 do
           Result.ResponseText := Result.ResponseText + JsonString(LResponseParts.Items[I] as TJSONObject, 'text');
 
+      CheckCompletion(JsonString(LCandidate, 'finishReason'), Result.ResponseText);
+      if Trim(Result.ResponseText) = '' then
+        raise Exception.Create('Gemini returned no text. Check finishReason or promptFeedback.');
       Result.Status := prsSucceeded;
       Result.FinishedAt := Now;
       Result.DurationMs := MilliSecondsBetween(Result.FinishedAt, Result.StartedAt);
@@ -770,7 +777,8 @@ begin
   AModels := TModelDescriptorList.Create(True);
   LRequest := TProviderRequest.Create;
   try
-    LRequest.TimeoutSeconds := 20;
+    LRequest.TimeoutSeconds := Min(20, Max(CMinRequestTimeoutSeconds, ASettings.TimeoutSeconds));
+    LRequest.ProxySetting.Assign(ASettings.ProxySetting);
     LRoot := TJSONObject.ParseJSONValue(ExecuteGet(
       NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL) + '/models',
       [TNameValuePair.Create('x-goog-api-key', ASettings.ApiKey)],
@@ -829,11 +837,7 @@ end;
 function TClaudeProvider.Execute(const ARequest: TProviderRequest; const ASettings: TAIProviderSetting): TProviderResponse;
 var
   LBody: TJSONObject;
-  LMessages: TJSONArray;
-  LMessage: TJSONObject;
   LRoot: TJSONObject;
-  LContent: TJSONArray;
-  LItem: TJSONObject;
 begin
   Result := TProviderResponse.Create;
   Result.RequestId := ARequest.RequestId;
@@ -846,21 +850,8 @@ begin
   Result.StartedAt := Now;
   Result.Status := prsRunning;
 
-  LBody := TJSONObject.Create;
+  LBody := BuildClaudeRequest(ARequest);
   try
-    LMessages := TJSONArray.Create;
-    LMessage := TJSONObject.Create;
-    LMessage.AddPair('role', 'user');
-    LMessage.AddPair('content', ARequest.QuestionText);
-    LMessages.AddElement(LMessage);
-
-    LBody.AddPair('model', ARequest.ModelId);
-    LBody.AddPair('max_tokens', TJSONNumber.Create(Max(128, ARequest.MaxTokens)));
-    LBody.AddPair('messages', LMessages);
-    LBody.AddPair('temperature', TJSONNumber.Create(ARequest.Temperature));
-    if ASettings.TopP >= 0 then
-      LBody.AddPair('top_p', TJSONNumber.Create(ASettings.TopP));
-
     LRoot := TJSONObject.ParseJSONValue(ExecutePost(
       NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL) + '/v1/messages',
       LBody.ToJSON,
@@ -874,17 +865,10 @@ begin
       if not Assigned(LRoot) then
         raise Exception.Create('Invalid response from Claude.');
 
-      LContent := JsonArray(LRoot, 'content');
-      if (not Assigned(LContent)) or (LContent.Count = 0) then
-      begin
-        Result.ErrorText := ExtractErrorText(LRoot);
-        if Result.ErrorText = '' then
-          Result.ErrorText := 'Claude returned no content.';
-        raise Exception.Create(Result.ErrorText);
-      end;
-
-      LItem := LContent.Items[0] as TJSONObject;
-      Result.ResponseText := JsonString(LItem, 'text');
+      Result.ResponseText := ExtractClaudeText(LRoot);
+      CheckCompletion(JsonString(LRoot, 'stop_reason'), Result.ResponseText);
+      if Result.ResponseText = '' then
+        raise Exception.Create('Claude returned no text blocks. Check the model, response type and stop reason.');
       Result.Status := prsSucceeded;
       Result.FinishedAt := Now;
       Result.DurationMs := MilliSecondsBetween(Result.FinishedAt, Result.StartedAt);
@@ -942,7 +926,8 @@ begin
   AModels := TModelDescriptorList.Create(True);
   LRequest := TProviderRequest.Create;
   try
-    LRequest.TimeoutSeconds := 20;
+    LRequest.TimeoutSeconds := Min(20, Max(CMinRequestTimeoutSeconds, ASettings.TimeoutSeconds));
+    LRequest.ProxySetting.Assign(ASettings.ProxySetting);
     LRoot := TJSONObject.ParseJSONValue(ExecuteGet(
       NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL) + '/v1/models',
       [
@@ -986,6 +971,22 @@ begin
     FreeAndNil(AModels);
 end;
 
+function TOllamaProvider.RootURL(const ASettings: TAIProviderSetting): string;
+begin
+  Result := NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL);
+  if Result.EndsWith('/generate') then Delete(Result, Length(Result) - Length('/generate') + 1, MaxInt);
+  if Result.EndsWith('/chat') then Delete(Result, Length(Result) - Length('/chat') + 1, MaxInt);
+  if not Result.EndsWith('/api') then Result := Result + '/api';
+end;
+
+function TOllamaProvider.AuthHeaders(const ASettings: TAIProviderSetting): TNetHeaders;
+begin
+  SetLength(Result, 0);
+  if Trim(ASettings.ApiKey) = '' then Exit;
+  SetLength(Result, 1);
+  Result[0] := TNameValuePair.Create('Authorization', 'Bearer ' + Trim(ASettings.ApiKey));
+end;
+
 function TOllamaProvider.Execute(const ARequest: TProviderRequest; const ASettings: TAIProviderSetting): TProviderResponse;
 var
   LBody: TJSONObject;
@@ -1005,7 +1006,7 @@ begin
   LBody := TJSONObject.Create;
   try
     LBody.AddPair('model', ARequest.ModelId);
-    LBody.AddPair('prompt', ARequest.QuestionText);
+    LBody.AddPair('prompt', DelphiPrompt(ARequest.QuestionText));
     LBody.AddPair('stream', TJSONBool.Create(False));
     LBody.AddPair('options', TJSONObject.Create);
     if ARequest.MaxTokens > 0 then
@@ -1018,9 +1019,9 @@ begin
       TJSONObject(LBody.Values['options']).AddPair('top_k', TJSONNumber.Create(ASettings.TopK));
 
     LRoot := TJSONObject.ParseJSONValue(ExecutePost(
-      NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL) + '/generate',
+      RootURL(ASettings) + '/generate',
       LBody.ToJSON,
-      [],
+      AuthHeaders(ASettings),
       ARequest
     )) as TJSONObject;
     try
@@ -1028,6 +1029,8 @@ begin
         raise Exception.Create('Invalid response from Ollama.');
 
       Result.ResponseText := JsonString(LRoot, 'response');
+      // Truncation first, so an exhausted budget is not reported as an empty response.
+      CheckCompletion(JsonString(LRoot, 'done_reason'), Result.ResponseText);
       if Result.ResponseText = '' then
       begin
         Result.ErrorText := ExtractErrorText(LRoot);
@@ -1092,10 +1095,11 @@ begin
   AModels := TModelDescriptorList.Create(True);
   LRequest := TProviderRequest.Create;
   try
-    LRequest.TimeoutSeconds := 20;
+    LRequest.TimeoutSeconds := Min(20, Max(CMinRequestTimeoutSeconds, ASettings.TimeoutSeconds));
+    LRequest.ProxySetting.Assign(ASettings.ProxySetting);
     LRoot := TJSONObject.ParseJSONValue(ExecuteGet(
-      NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL) + '/tags',
-      [],
+      RootURL(ASettings) + '/tags',
+      AuthHeaders(ASettings),
       LRequest
     )) as TJSONObject;
     try
@@ -1240,20 +1244,27 @@ begin
     if not Assigned(LProvider) then
       Exit;
 
-    LModels := LProvider.Values['models'] as TJSONArray;
+    if not (LProvider.Values['models'] is TJSONArray) then Exit;
+    LModels := TJSONArray(LProvider.Values['models']);
     if not Assigned(LModels) then
       Exit;
 
     for I := 0 to LModels.Count - 1 do
     begin
-      LItem := LModels.Items[I] as TJSONObject;
+      if not (LModels.Items[I] is TJSONObject) then Continue;
+      LItem := TJSONObject(LModels.Items[I]);
+      if CacheString(LItem, 'id') = '' then Continue;
       LDescriptor := TModelDescriptor.Create;
       LDescriptor.ProviderId := AProviderId;
-      LDescriptor.ModelId := LItem.GetValue<string>('id', '');
-      LDescriptor.DisplayName := LItem.GetValue<string>('display_name', '');
+      LDescriptor.ModelId := CacheString(LItem, 'id');
+      LDescriptor.DisplayName := CacheString(LItem, 'display_name');
       if LDescriptor.DisplayName = '' then
         LDescriptor.DisplayName := LDescriptor.ModelId;
-      LDescriptor.FetchedAt := ISO8601ToDate(LItem.GetValue<string>('fetched_at', DateToISO8601(Now)));
+      try
+        LDescriptor.FetchedAt := ISO8601ToDate(CacheString(LItem, 'fetched_at'));
+      except
+        LDescriptor.FetchedAt := Now;
+      end;
       Result.Add(LDescriptor);
     end;
   finally
@@ -1271,20 +1282,24 @@ begin
   if not Assigned(ARoot) then
     Exit;
 
-  LProviders := ARoot.Values['providers'] as TJSONArray;
+  LProviders := nil;
+  if ARoot.Values['providers'] is TJSONArray then
+    LProviders := TJSONArray(ARoot.Values['providers']);
   if not Assigned(LProviders) then
   begin
     if not ACreate then
       Exit;
 
+    ARoot.RemovePair('providers').Free;
     LProviders := TJSONArray.Create;
     ARoot.AddPair('providers', LProviders);
   end;
 
   for I := 0 to LProviders.Count - 1 do
   begin
-    LItem := LProviders.Items[I] as TJSONObject;
-    if SameText(LItem.GetValue<string>('provider_id', ''), AProviderId) then
+    if not (LProviders.Items[I] is TJSONObject) then Continue;
+    LItem := TJSONObject(LProviders.Items[I]);
+    if SameText(CacheString(LItem, 'provider_id'), AProviderId) then
       Exit(LItem);
   end;
 
@@ -1307,15 +1322,24 @@ end;
 function TModelCatalogService.LoadCache: TJSONObject;
 var
   LPath: string;
+  LValue: TJSONValue;
 begin
-  LPath := GetCacheFilePath;
-  if FileExists(LPath) then
-    Result := TJSONObject.ParseJSONValue(TFile.ReadAllText(LPath, TEncoding.UTF8)) as TJSONObject
-  else
-    Result := nil;
-
-  if not Assigned(Result) then
-    Result := TJSONObject.Create;
+  Result := nil;
+  LValue := nil;
+  try
+    LPath := GetCacheFilePath;
+    if FileExists(LPath) then
+      LValue := TJSONObject.ParseJSONValue(TFile.ReadAllText(LPath, TEncoding.UTF8));
+    if LValue is TJSONObject then
+    begin
+      Result := TJSONObject(LValue);
+      LValue := nil;
+    end;
+  except
+    // The cache is disposable; malformed/unreadable cache data must not block settings.
+  end;
+  LValue.Free;
+  if not Assigned(Result) then Result := TJSONObject.Create;
 end;
 
 function TModelCatalogService.RefreshModels(const AProvider: IAIProvider; const ASettings: TAIProviderSetting; out AError: string): TModelDescriptorList;
@@ -1343,15 +1367,32 @@ begin
           .AddPair('display_name', LItem.DisplayName)
           .AddPair('fetched_at', DateToISO8601(Now))
       );
-    SaveCache(LRoot);
+    try
+      SaveCache(LRoot);
+    except
+      // A disposable cache must not discard a successful network model listing.
+      on E: Exception do AError := 'Models loaded, but the cache could not be saved: ' + E.Message;
+    end;
   finally
     LRoot.Free;
   end;
 end;
 
 procedure TModelCatalogService.SaveCache(ARoot: TJSONObject);
+var
+  LPath, LTempPath: string;
+  LGuid: TGUID;
 begin
-  TFile.WriteAllText(GetCacheFilePath, ARoot.ToJSON, TEncoding.UTF8);
+  LPath := GetCacheFilePath;
+  CreateGUID(LGuid);
+  LTempPath := LPath + '.' + GUIDToString(LGuid) + '.tmp';
+  try
+    TFile.WriteAllText(LTempPath, ARoot.ToJSON, TEncoding.UTF8);
+    if not MoveFileEx(PChar(LTempPath), PChar(LPath), MOVEFILE_REPLACE_EXISTING or MOVEFILE_WRITE_THROUGH) then
+      RaiseLastOSError;
+  finally
+    if FileExists(LTempPath) then System.SysUtils.DeleteFile(LTempPath);
+  end;
 end;
 
 end.

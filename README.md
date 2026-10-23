@@ -1,5 +1,8 @@
 # FusionAI
 
+> **Fork expérimental Delphi 10.2 Tokyo** — [installation et essais en français](docs/TOKYO_PREVIEW.md).
+> Correctifs en cours de validation ; compilation native Delphi et tests dans l’IDE encore à effectuer.
+
 <p align="center">
   <img src="./Logo.png" alt="FusionAI logo" width="220" />
 </p>
@@ -152,7 +155,7 @@ Then run the `Ask` action from the editor popup menu or use its shortcut.
 - Refactor Code
 - Convert to Assembly
 
-The response is inserted back into the editor as a multiline comment after the selected code.
+The response is previewed before insertion, then added as line comments after the selected code or at the cursor.
 
 ### Context Menu
 
