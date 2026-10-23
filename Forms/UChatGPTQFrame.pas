@@ -22,7 +22,7 @@ uses
   FireDAC.Stan.Async, FireDAC.DApt, FireDAC.UI.Intf, FireDAC.Stan.Def, FireDAC.Stan.Pool,
   FireDAC.Phys, FireDAC.Stan.ExprFuncs, FireDAC.Phys.SQLite, FireDAC.Comp.Client,
   FireDAC.Comp.DataSet, FireDAC.VCLUI.Wait, FireDAC.Comp.UI, UConsts,
-  Vcl.WinXCtrls, System.ImageList, Vcl.ImgList, ShellApi, UAICommon,
+  Vcl.WinXCtrls, System.ImageList, Vcl.ImgList, Winapi.ShellAPI, UAICommon,
   UAIProviders, UAIRequestCoordinator, UAIHistory, UEditorHelpers;
 
 type
