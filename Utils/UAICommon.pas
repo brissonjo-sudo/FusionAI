@@ -5,7 +5,8 @@ interface
 uses
   System.Classes,
   System.SysUtils,
-  System.Generics.Collections;
+  System.Generics.Collections,
+  System.SyncObjs;
 
 type
   TProviderRequestStatus = (prsQueued, prsRunning, prsSucceeded, prsFailed, prsCancelled);
@@ -64,7 +65,11 @@ type
     FTopP: Double;
     FTopK: Integer;
     FApiVersion: string;
+    FProxySetting: TProxySetting;
+    FTimeoutSeconds: Integer;
   public
+    constructor Create;
+    destructor Destroy; override;
     procedure Assign(const ASource: TAIProviderSetting);
     function Clone: TAIProviderSetting;
 
@@ -79,6 +84,8 @@ type
     property TopP: Double read FTopP write FTopP;
     property TopK: Integer read FTopK write FTopK;
     property ApiVersion: string read FApiVersion write FApiVersion;
+    property ProxySetting: TProxySetting read FProxySetting;
+    property TimeoutSeconds: Integer read FTimeoutSeconds write FTimeoutSeconds;
   end;
 
   TProviderRequest = class
@@ -96,9 +103,13 @@ type
     FLogEnabled: Boolean;
     FLogDirectory: string;
     FProxySetting: TProxySetting;
+    FCancelled: Integer;
   public
     constructor Create;
     destructor Destroy; override;
+    procedure Cancel;
+    function IsCancelled: Boolean;
+    procedure ReceiveData(const Sender: TObject; AContentLength, AReadCount: Int64; var Abort: Boolean);
 
     property RequestId: string read FRequestId write FRequestId;
     property BatchId: string read FBatchId write FBatchId;
@@ -210,6 +221,20 @@ begin
   Result.Assign(Self);
 end;
 
+constructor TAIProviderSetting.Create;
+begin
+  inherited Create;
+  FProxySetting := TProxySetting.Create;
+  FTemperature := -1;
+  FTopP := -1;
+end;
+
+destructor TAIProviderSetting.Destroy;
+begin
+  FProxySetting.Free;
+  inherited;
+end;
+
 procedure TAIProviderSetting.Assign(const ASource: TAIProviderSetting);
 begin
   if not Assigned(ASource) then
@@ -226,6 +251,8 @@ begin
   FTopP := ASource.TopP;
   FTopK := ASource.TopK;
   FApiVersion := ASource.ApiVersion;
+  FProxySetting.Assign(ASource.ProxySetting);
+  FTimeoutSeconds := ASource.TimeoutSeconds;
 end;
 
 function TAIProviderSetting.Clone: TAIProviderSetting;
@@ -244,6 +271,21 @@ destructor TProviderRequest.Destroy;
 begin
   FProxySetting.Free;
   inherited;
+end;
+
+procedure TProviderRequest.Cancel;
+begin
+  TInterlocked.Exchange(FCancelled, 1);
+end;
+
+function TProviderRequest.IsCancelled: Boolean;
+begin
+  Result := TInterlocked.CompareExchange(FCancelled, 0, 0) <> 0;
+end;
+
+procedure TProviderRequest.ReceiveData(const Sender: TObject; AContentLength, AReadCount: Int64; var Abort: Boolean);
+begin
+  Abort := IsCancelled;
 end;
 
 constructor TProviderResponse.Create;

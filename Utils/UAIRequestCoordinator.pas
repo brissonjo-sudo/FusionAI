@@ -9,6 +9,7 @@ uses
   System.Math,
   System.SysUtils,
   System.Generics.Collections,
+  Vcl.ExtCtrls,
   UAICommon,
   UAIProviders,
   UChatGPTSetting,
@@ -17,17 +18,16 @@ uses
 type
   TProviderExecutionThread = class(TThread)
   private
-    FTargetHandle: HWND;
     FProvider: IAIProvider;
     FRequest: TProviderRequest;
     FSettings: TAIProviderSetting;
     FLastResponse: TProviderResponse;
-    procedure PostPayload(APayload: TProviderMessagePayload);
     function BuildFailedResponse(const AMessage: string): TProviderResponse;
   protected
     procedure Execute; override;
   public
-    constructor Create(ATargetHandle: HWND; const AProvider: IAIProvider; const ARequest: TProviderRequest;
+    // Takes ownership of ARequest and ASettings; the worker never calls the UI.
+    constructor Create(const AProvider: IAIProvider; const ARequest: TProviderRequest;
       const ASettings: TAIProviderSetting);
     destructor Destroy; override;
 
@@ -41,7 +41,8 @@ type
     FThreads: TObjectDictionary<string, TProviderExecutionThread>;
     FCurrentBatchId: string;
     FSignalBatchCompleted: Boolean;
-    procedure ThreadTerminated(Sender: TObject);
+    FPollTimer: TTimer;
+    procedure PollThreads(Sender: TObject);
     procedure PostBatchCompleted(const ABatchId: string);
     function NewId: string;
     function BuildRequest(const AProviderId, APrompt, AQuestionLabel: string): TProviderRequest;
@@ -81,19 +82,19 @@ begin
   Result.DurationMs := 0;
 end;
 
-constructor TProviderExecutionThread.Create(ATargetHandle: HWND; const AProvider: IAIProvider; const ARequest: TProviderRequest;
+constructor TProviderExecutionThread.Create(const AProvider: IAIProvider; const ARequest: TProviderRequest;
   const ASettings: TAIProviderSetting);
 begin
   inherited Create(True);
-  FreeOnTerminate := True;
-  FTargetHandle := ATargetHandle;
+  FreeOnTerminate := False;
   FProvider := AProvider;
   FRequest := ARequest;
-  FSettings := ASettings.Clone;
+  FSettings := ASettings; // ownership transferred by caller
 end;
 
 destructor TProviderExecutionThread.Destroy;
 begin
+  FLastResponse.Free;
   FRequest.Free;
   FSettings.Free;
   inherited;
@@ -123,22 +124,13 @@ begin
     end;
   except
     on E: Exception do
+    begin
+      FreeAndNil(FLastResponse);
       FLastResponse := BuildFailedResponse(E.Message);
+    end;
   end;
 
-  if Assigned(FLastResponse) then
-    PostPayload(TProviderMessagePayload.Create(pmRequestCompleted, FRequest.BatchId, FRequest.ProviderId, FLastResponse.Clone));
-end;
-
-procedure TProviderExecutionThread.PostPayload(APayload: TProviderMessagePayload);
-begin
-  if IsWindow(FTargetHandle) then
-  begin
-    if not PostMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(APayload), 0) then
-      APayload.Free;
-  end
-  else
-    APayload.Free;
+  // Result is read by the main-thread poller only after the OS thread has exited.
 end;
 
 function TAIRequestCoordinator.BuildRequest(const AProviderId, APrompt, AQuestionLabel: string): TProviderRequest;
@@ -154,9 +146,9 @@ begin
   Result.QuestionText := APrompt;
   Result.QuestionLabel := AQuestionLabel;
   if LSettings.TimeOut > 0 then
-    Result.TimeoutSeconds := Max(CMinRequestTimeoutSeconds, LSettings.TimeOut)
+    Result.TimeoutSeconds := EnsureRange(LSettings.TimeOut, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds)
   else
-  Result.TimeoutSeconds := CDefaultRequestTimeoutSeconds;
+    Result.TimeoutSeconds := CDefaultRequestTimeoutSeconds;
   Result.Animated := LSettings.AnimatedLetters;
   Result.LogEnabled := LSettings.EnableFileLog;
   Result.LogDirectory := LSettings.LogDirectory;
@@ -164,15 +156,19 @@ begin
   LProviderSetting := LSettings.GetProviderSetting(AProviderId);
   try
     Result.ModelId := LSettings.GetEffectiveModel(AProviderId);
+    // 0 means "provider default": Gemini omits the field, Claude uses its own default.
+    // Ollama keeps the shared limit, since its own default generation is unbounded.
     if LProviderSetting.MaxTokens > 0 then
       Result.MaxTokens := LProviderSetting.MaxTokens
+    else if SameText(AProviderId, ProviderOllama) then
+      Result.MaxTokens := LSettings.MaxToken
     else
-      Result.MaxTokens := LSettings.MaxToken;
+      Result.MaxTokens := 0;
 
     if LProviderSetting.Temperature >= 0 then
       Result.Temperature := LProviderSetting.Temperature
     else
-      Result.Temperature := LSettings.Temperature;
+      Result.Temperature := -1;
   finally
     LProviderSetting.Free;
   end;
@@ -182,25 +178,38 @@ procedure TAIRequestCoordinator.CancelAll;
 var
   LThread: TProviderExecutionThread;
 begin
+  if not Assigned(FThreads) then Exit;
   for LThread in FThreads.Values do
   begin
-    LThread.OnTerminate := nil;
+    LThread.Request.Cancel;
     LThread.Terminate;
   end;
-  FThreads.Clear;
-  FCurrentBatchId := '';
+  FCurrentBatchId := ''; // cancelled workers stay owned until actually finished
 end;
 
 constructor TAIRequestCoordinator.Create(AOwner: TComponent; ATargetHandle: HWND);
 begin
   inherited Create(AOwner);
   FTargetHandle := ATargetHandle;
-  FThreads := TObjectDictionary<string, TProviderExecutionThread>.Create;
+  FThreads := TObjectDictionary<string, TProviderExecutionThread>.Create([doOwnsValues]);
+  FPollTimer := TTimer.Create(Self);
+  FPollTimer.Enabled := False;
+  FPollTimer.Interval := 100;
+  FPollTimer.OnTimer := PollThreads;
 end;
 
 destructor TAIRequestCoordinator.Destroy;
+var
+  LThread: TProviderExecutionThread;
 begin
+  if Assigned(FPollTimer) then FPollTimer.Enabled := False;
+  FTargetHandle := 0;
   CancelAll;
+  // Workers never Synchronize or call OnTerminate into the UI. Joining cannot
+  // depend on this component. Before HTTP headers, Tokyo may wait for timeout.
+  if Assigned(FThreads) then
+    for LThread in FThreads.Values do
+      LThread.WaitFor;
   FThreads.Free;
   inherited;
 end;
@@ -237,8 +246,13 @@ begin
 end;
 
 function TAIRequestCoordinator.PendingCount: Integer;
+var
+  LThread: TProviderExecutionThread;
 begin
-  Result := FThreads.Count;
+  Result := 0;
+  if FCurrentBatchId = '' then Exit;
+  for LThread in FThreads.Values do
+    if LThread.Request.BatchId = FCurrentBatchId then Inc(Result);
 end;
 
 procedure TAIRequestCoordinator.PostBatchCompleted(const ABatchId: string);
@@ -248,8 +262,7 @@ begin
   LPayload := TProviderMessagePayload.Create(pmBatchCompleted, ABatchId, '');
   if IsWindow(FTargetHandle) then
   begin
-    if not PostMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0) then
-      LPayload.Free;
+    SendMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0);
   end
   else
     LPayload.Free;
@@ -264,6 +277,9 @@ var
   LPayload: TProviderMessagePayload;
 begin
   CancelAll;
+  PollThreads(nil);
+  if FThreads.Count > 4 then
+    raise Exception.Create('Cancelled requests are still finishing. Please wait before retrying.');
   FCurrentBatchId := NewId;
   FSignalBatchCompleted := True;
   LRegistry := TAIProviderRegistry.Instance;
@@ -272,22 +288,26 @@ begin
   for LProviderId in LProviderIds do
   begin
     LThread := TProviderExecutionThread.Create(
-      FTargetHandle,
       LRegistry.GetProvider(LProviderId),
       BuildRequest(LProviderId, APrompt, AQuestionLabel),
       TSingletonSettingObj.Instance.GetProviderSetting(LProviderId)
     );
-    LThread.OnTerminate := ThreadTerminated;
+
     FThreads.Add(LThread.Request.RequestId, LThread);
+    try
+      LThread.Start;
+    except
+      FThreads.Remove(LThread.Request.RequestId);
+      raise;
+    end;
     LPayload := TProviderMessagePayload.Create(pmRequestStarted, FCurrentBatchId, LProviderId);
     if IsWindow(FTargetHandle) then
     begin
-      if not PostMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0) then
-        LPayload.Free;
+      SendMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0);
     end
     else
       LPayload.Free;
-    LThread.Start;
+    FPollTimer.Enabled := True;
   end;
 end;
 
@@ -298,56 +318,68 @@ var
   LPayload: TProviderMessagePayload;
 begin
   CancelAll;
+  PollThreads(nil);
+  if FThreads.Count > 4 then
+    raise Exception.Create('Cancelled requests are still finishing. Please wait before retrying.');
   FCurrentBatchId := NewId;
   FSignalBatchCompleted := ASignalBatchCompleted;
   LRegistry := TAIProviderRegistry.Instance;
   LThread := TProviderExecutionThread.Create(
-    FTargetHandle,
     LRegistry.GetProvider(AProviderId),
     BuildRequest(AProviderId, APrompt, AQuestionLabel),
     TSingletonSettingObj.Instance.GetProviderSetting(AProviderId)
   );
-  LThread.OnTerminate := ThreadTerminated;
+
   FThreads.Add(LThread.Request.RequestId, LThread);
+  try
+    LThread.Start;
+  except
+    FThreads.Remove(LThread.Request.RequestId);
+    raise;
+  end;
   LPayload := TProviderMessagePayload.Create(pmRequestStarted, FCurrentBatchId, AProviderId);
   if IsWindow(FTargetHandle) then
   begin
-    if not PostMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0) then
-      LPayload.Free;
+    SendMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0);
   end
   else
     LPayload.Free;
-  LThread.Start;
+  FPollTimer.Enabled := True;
 end;
 
-procedure TAIRequestCoordinator.ThreadTerminated(Sender: TObject);
+procedure TAIRequestCoordinator.PollThreads(Sender: TObject);
 var
+  LIds: TArray<string>;
+  LId, LBatchId: string;
   LThread: TProviderExecutionThread;
-  LBatchId: string;
-  LPendingThread: TProviderExecutionThread;
-  LHasPendingCurrentBatch: Boolean;
+  LResponse: TProviderResponse;
+  LPayload: TProviderMessagePayload;
 begin
-  LThread := Sender as TProviderExecutionThread;
-  LBatchId := '';
-  if Assigned(LThread) and Assigned(LThread.Request) then
-  begin
-    LBatchId := LThread.Request.BatchId;
-    FThreads.Remove(LThread.Request.RequestId);
-  end;
-
-  if (LBatchId = '') or (not SameText(LBatchId, FCurrentBatchId)) then
-    Exit;
-
-  LHasPendingCurrentBatch := False;
-  for LPendingThread in FThreads.Values do
-    if Assigned(LPendingThread.Request) and SameText(LPendingThread.Request.BatchId, LBatchId) then
+  LIds := FThreads.Keys.ToArray;
+  for LId in LIds do
+    if FThreads.TryGetValue(LId, LThread) and
+       (WaitForSingleObject(LThread.Handle, 0) = WAIT_OBJECT_0) then
     begin
-      LHasPendingCurrentBatch := True;
-      Break;
+      LResponse := nil;
+      LBatchId := LThread.Request.BatchId;
+      if (LBatchId = FCurrentBatchId) and Assigned(LThread.LastResponse) then
+        LResponse := LThread.LastResponse.Clone;
+      FThreads.Remove(LId); // owns and frees only a finished worker
+      if Assigned(LResponse) then
+      begin
+        LPayload := TProviderMessagePayload.Create(pmRequestCompleted, LBatchId, LResponse.ProviderId, LResponse);
+        // Main-thread synchronous delivery leaves no heap payload in a dead window queue.
+        if IsWindow(FTargetHandle) then
+          SendMessage(FTargetHandle, WM_PROVIDER_MESSAGE, WPARAM(LPayload), 0)
+        else LPayload.Free;
+      end;
     end;
-
-  if FSignalBatchCompleted and (not LHasPendingCurrentBatch) then
-    PostBatchCompleted(LBatchId);
+  FPollTimer.Enabled := FThreads.Count > 0;
+  if (FCurrentBatchId <> '') and FSignalBatchCompleted and (PendingCount = 0) then
+  begin
+    FSignalBatchCompleted := False;
+    PostBatchCompleted(FCurrentBatchId);
+  end;
 end;
 
 end.

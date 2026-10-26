@@ -37,6 +37,8 @@ type
 
 implementation
 
+uses UEditorHelpers, UAIText;
+
 function StripInlineComment(const ALine: string): string;
 var
   I: Integer;
@@ -165,20 +167,8 @@ begin
 end;
 
 function CountKeywordOccurrence(const ALineLower, AKeyword: string): Integer;
-var
-  LSearchFrom: Integer;
-  LPos: Integer;
 begin
-  Result := 0;
-  LSearchFrom := 1;
-  repeat
-    LPos := PosEx(AKeyword, ALineLower, LSearchFrom);
-    if LPos > 0 then
-    begin
-      Inc(Result);
-      LSearchFrom := LPos + Length(AKeyword);
-    end;
-  until LPos = 0;
+  Result := CountPascalKeyword(ALineLower, AKeyword);
 end;
 
 function ExtractRoutineImplementations(AUnitContent: TStrings; const ATypeName: string): string;
@@ -190,15 +180,17 @@ var
   LTrimLower: string;
   LDepth: Integer;
   LBodyStarted: Boolean;
-  LOutput: TStringList;
+  LOutput, LSyntax: TStringList;
 begin
   LOutput := TStringList.Create;
+  LSyntax := TStringList.Create;
   try
+    LSyntax.Text := MaskPascalText(AUnitContent.Text);
     LTypeNameLower := LowerCase(ATypeName);
     I := 0;
     while I < AUnitContent.Count do
     begin
-      LLineLower := LowerCase(Trim(StripInlineComment(AUnitContent[I])));
+      LLineLower := LowerCase(Trim(LSyntax[I]));
       if IsRoutineStart(LLineLower, LTypeNameLower) then
       begin
         LDepth := 0;
@@ -207,9 +199,9 @@ begin
         while J < AUnitContent.Count do
         begin
           LOutput.Add(AUnitContent[J]);
-          LTrimLower := LowerCase(Trim(StripInlineComment(AUnitContent[J])));
+          LTrimLower := LowerCase(Trim(LSyntax[J]));
 
-          if Pos('begin', LTrimLower) > 0 then
+          if CountKeywordOccurrence(LTrimLower, 'begin') > 0 then
           begin
             Inc(LDepth, CountKeywordOccurrence(LTrimLower, 'begin'));
             LBodyStarted := True;
@@ -219,19 +211,21 @@ begin
           if Pos('try', LTrimLower) > 0 then
             Inc(LDepth, CountKeywordOccurrence(LTrimLower, 'try'));
           if Pos('asm', LTrimLower) > 0 then
+          begin
             Inc(LDepth, CountKeywordOccurrence(LTrimLower, 'asm'));
+            if CountKeywordOccurrence(LTrimLower, 'asm') > 0 then LBodyStarted := True;
+          end;
           if Pos('repeat', LTrimLower) > 0 then
             Inc(LDepth, CountKeywordOccurrence(LTrimLower, 'repeat'));
 
-          if StartsText('until', LTrimLower) and LBodyStarted then
-            Dec(LDepth);
-
-          if StartsText('end', LTrimLower) and (Pos(';', LTrimLower) > 0) and LBodyStarted then
+          if LBodyStarted then
           begin
-            Dec(LDepth);
-            if LDepth <= 0 then
-              Break;
-          end;
+            Dec(LDepth, CountKeywordOccurrence(LTrimLower, 'until'));
+            Dec(LDepth, CountKeywordOccurrence(LTrimLower, 'end'));
+            if LDepth <= 0 then Break;
+          end
+          else if (CountKeywordOccurrence(LTrimLower, 'forward') > 0) or
+                  (CountKeywordOccurrence(LTrimLower, 'external') > 0) then Break;
 
           Inc(J);
         end;
@@ -244,6 +238,7 @@ begin
 
     Result := Trim(LOutput.Text);
   finally
+    LSyntax.Free;
     LOutput.Free;
   end;
 end;
@@ -398,10 +393,12 @@ var
   LvLine: string;
   lvHasClassToken, LvHasEqualToken: Boolean;
 begin
+  lvHasClassToken := False;
+  LvHasEqualToken := False;
   LvPos := ALexer.TokenPos;
 
   try
-    while ALexer.TokenID <> ptCRLF do
+    while not (ALexer.TokenID in [ptCRLF, ptNull]) do
     begin
       LvLine := LvLine + ALexer.Token;
       if ALexer.TokenID = ptClass then
@@ -425,7 +422,7 @@ var
   PassedTypeIdentifier: Boolean;
   LvTempContent, LvTempClassName: string;
   LvSourceLoader: TStringList;
-  LvFileStream: TFileStream;
+  LSourceText: string;
 begin
   if ACurrentUnitPath.IsEmpty then
     Exit;
@@ -436,20 +433,20 @@ begin
 
   LvLexer := TMwPasLex.Create;
   try
-    LvFileStream := TFileStream.Create(ACurrentUnitPath, fmOpenRead or fmShareDenyNone);
-    try
+    if not TryReadCurrentSource(LSourceText) then
+    begin
+      if not FileExists(ACurrentUnitPath) then Exit;
       LvSourceLoader := TStringList.Create;
       try
-        LvSourceLoader.LoadFromStream(LvFileStream);
-        LvLexer.Origin := PChar(LvSourceLoader.Text);
-        LvLexer.Init;
-        LvLexer.Next;
+        LvSourceLoader.LoadFromFile(ACurrentUnitPath);
+        LSourceText := LvSourceLoader.Text;
       finally
         LvSourceLoader.Free;
       end;
-    finally
-      LvFileStream.Free;
     end;
+    LvLexer.Origin := PChar(LSourceText);
+    LvLexer.Init;
+    LvLexer.Next;
 
     while (LvLexer.TokenID <> ptNull) do
     begin
@@ -463,7 +460,7 @@ begin
           if not FClassList.ContainsKey(LvTempClassName) then
             FClassList.Add(LvTempClassName, TStringList.Create);
 
-          while LvLexer.TokenID <> ptEnd do
+          while not (LvLexer.TokenID in [ptEnd, ptNull]) do
           begin
             LvTempContent := LvTempContent + LvLexer.Token;
             LvLexer.Next;
@@ -475,6 +472,7 @@ begin
             end;
           end;
 
+          if LvLexer.TokenID = ptNull then Break;
           LvLexer.NextNoJunk;
           if LvLexer.TokenID = ptSemiColon then
             LvTempContent := LvTempContent + LvLexer.Token;
@@ -498,8 +496,8 @@ procedure TcpLexer.ParseSourceCode2(ACurrentUnitPath: string);
 var
   I: Integer;
   LvTypeName: string;
-  LvTempStr: TStringList;
-  LvFileStream: TFileStream;
+  LvTempStr, LSyntax: TStringList;
+  LSourceText: string;
   LCurrentTypeName: string;
   LTypeSource: TStringList;
   LInsideTypeSection: Boolean;
@@ -543,17 +541,22 @@ var
   end;
 begin
   FClassList.Clear;
-  if not FileExists(ACurrentUnitPath) then
-    Exit;
-
-  LvTempStr := TStringList.Create;
-  LTypeSource := nil;
-  LvFileStream := TFileStream.Create(ACurrentUnitPath, fmOpenRead or fmShareDenyNone);
-  try
-    LvTempStr.LoadFromStream(LvFileStream);
-  finally
-    LvFileStream.Free;
+  if not TryReadCurrentSource(LSourceText) then
+  begin
+    if not FileExists(ACurrentUnitPath) then Exit;
+    LvTempStr := TStringList.Create;
+    try
+      LvTempStr.LoadFromFile(ACurrentUnitPath);
+      LSourceText := LvTempStr.Text;
+    finally
+      LvTempStr.Free;
+    end;
   end;
+  LvTempStr := TStringList.Create;
+  LSyntax := TStringList.Create;
+  LTypeSource := nil;
+  LvTempStr.Text := LSourceText;
+  LSyntax.Text := MaskPascalText(LSourceText);
 
   try
     LInsideTypeSection := False;
@@ -563,7 +566,7 @@ begin
 
     for I := 0 to Pred(LvTempStr.Count) do
     begin
-      LLine := Trim(StripInlineComment(LvTempStr[I]));
+      LLine := Trim(LSyntax[I]);
       LLineLower := LowerCase(LLine);
 
       if LCurrentTypeName <> '' then
@@ -636,6 +639,7 @@ begin
     StoreCurrentType;
   finally
     FreeAndNil(LTypeSource);
+    LSyntax.Free;
     LvTempStr.Free;
   end;
 end;

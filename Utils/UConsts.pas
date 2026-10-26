@@ -20,8 +20,8 @@ const
   DefaultOllamaBaseURL = 'http://localhost:11434/api';
 
   DefaultChatGPTModel = 'gpt-4o-mini';
-  DefaultGeminiModel = 'gemini-2.0-flash';
-  DefaultClaudeModel = 'claude-3-5-sonnet-latest';
+  DefaultGeminiModel = 'gemini-3.8-flash';
+  DefaultClaudeModel = 'claude-sonnet-4-6';
   DefaultOllamaModel = 'llama3.2';
 
   AnthropicVersionHeader = '2023-06-01';
@@ -44,7 +44,7 @@ const
 
   CPluginName = 'FusionAI';
   CLegacyPluginName = 'ChatGPTWizard';
-  CVersion = 'v3.1';
+  CVersion = 'v3.1.1-tokyo-preview.1';
   CVersionedName = CPluginName + ' - ' + CVersion;
   CPluginRepositoryUrl = 'https://github.com/AliDehbansiahkarbon/ChatGPTWizard';
   CRegistryRoot = '\SOFTWARE\' + CPluginName;
@@ -101,7 +101,8 @@ const
   CProviderUnavailableMessage = 'The selected provider is not available.';
   CInlineQuestionLabel = 'INLINE';
   CMinRequestTimeoutSeconds = 5;
-  CDefaultRequestTimeoutSeconds = 30;
+  CDefaultRequestTimeoutSeconds = 60;
+  CMaxRequestTimeoutSeconds = 120;
   CQuestionPromptLabel = 'Question:';
   CQuestionDraftPlaceholder = '[Type your question here]';
   CSelectedCodeLabel = 'Selected Delphi code:';

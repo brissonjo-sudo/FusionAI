@@ -150,8 +150,7 @@ end;
 procedure TFrm_Progress.FormDestroy(Sender: TObject);
 begin
   TimerStatus.Enabled := False;
-  if Assigned(FCoordinator) then
-    FCoordinator.CancelAll;
+  FreeAndNil(FCoordinator);
   Answer.Free;
 end;
 
@@ -179,7 +178,7 @@ begin
   {$IFEND}
   FStartedAt := Now;
   if TSingletonSettingObj.Instance.TimeOut > 0 then
-    FTimeoutSeconds := Max(CMinRequestTimeoutSeconds, TSingletonSettingObj.Instance.TimeOut)
+    FTimeoutSeconds := EnsureRange(TSingletonSettingObj.Instance.TimeOut, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds)
   else
     FTimeoutSeconds := CDefaultRequestTimeoutSeconds;
   FProviderName := ResolvePrimaryProviderName;
@@ -192,11 +191,9 @@ procedure TFrm_Progress.OnProviderMessage(var Msg: TMessage);
 var
   LPayload: TProviderMessagePayload;
 begin
-  if csDestroying in ComponentState then
-    Exit;
-
   LPayload := TProviderMessagePayload(Msg.WParam);
   try
+    if csDestroying in ComponentState then Exit;
     if not Assigned(LPayload) then
       Exit;
 
@@ -328,7 +325,11 @@ begin
     LSettings.Free;
   end;
 
-  FCoordinator.StartSingleProvider(LProviderId, SelectedText, CInlineQuestionLabel, False);
+  try
+    FCoordinator.StartSingleProvider(LProviderId, SelectedText, CInlineQuestionLabel, False);
+  except
+    on E: Exception do CancelAndCloseWithMessage(E.Message, True);
+  end;
 end;
 
 end.

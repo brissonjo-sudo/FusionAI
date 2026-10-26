@@ -14,7 +14,7 @@ unit UPascalLexer;
 
 interface
 uses
-  SysUtils, Classes, Controls, UPascalLexerTypes;
+  System.SysUtils, System.Classes, Vcl.Controls, UPascalLexerTypes;
 
 var
   Identifiers: array[#0..#255] of ByteBool;
@@ -355,7 +355,7 @@ type
 
 implementation
 
-uses Windows;
+uses Winapi.Windows;
 
 procedure MakeIdentTable;
 var
