@@ -826,7 +826,7 @@ begin
     FreeAndNil(AModels);
 end;
 
-function TClaudeProvider.Execute(const ARequest: TProviderRequest; const ASettings: TAIProviderSetting): TProviderResponse;
+{function TClaudeProvider.Execute(const ARequest: TProviderRequest; const ASettings: TAIProviderSetting): TProviderResponse;
 var
   LBody: TJSONObject;
   LMessages: TJSONArray;
@@ -901,6 +901,123 @@ begin
     end;
   end;
   LBody.Free;
+end;}
+
+function TClaudeProvider.Execute(const ARequest: TProviderRequest; const ASettings: TAIProviderSetting): TProviderResponse;
+var
+  LBody: TJSONObject;
+  LMessages: TJSONArray;
+  LMessage: TJSONObject;
+  LValue: TJSONValue;
+  LRoot: TJSONObject;
+  LContent: TJSONArray;
+  LItem: TJSONObject;
+  LRaw, LVersion, LUrl: string;
+  I: Integer;
+begin
+  Result := TProviderResponse.Create;
+  Result.RequestId := ARequest.RequestId;
+  Result.BatchId := ARequest.BatchId;
+  Result.ProviderId := GetId;
+  Result.ProviderDisplayName := GetDisplayName;
+  Result.ModelId := ARequest.ModelId;
+  Result.QuestionText := ARequest.QuestionText;
+  Result.QuestionLabel := ARequest.QuestionLabel;
+  Result.StartedAt := Now;
+  Result.Status := prsRunning;
+
+  try
+    LBody := TJSONObject.Create;
+    try
+      LMessages := TJSONArray.Create;
+      LMessage := TJSONObject.Create;
+      LMessage.AddPair('role', 'user');
+      LMessage.AddPair('content', ARequest.QuestionText);
+      LMessages.AddElement(LMessage);
+
+      LBody.AddPair('model', ARequest.ModelId);
+      LBody.AddPair('max_tokens', TJSONNumber.Create(Max(128, ARequest.MaxTokens)));
+      LBody.AddPair('messages', LMessages);
+
+{
+  DEPRECIER dans les dernieres versions de claude
+      // temperature OU top_p, jamais les deux (400 sur les modèles récents).
+      // Si l'API refuse encore, supprimer aussi temperature.
+      if ARequest.Temperature >= 0 then
+        LBody.AddPair('temperature', TJSONNumber.Create(ARequest.Temperature))
+      else if ASettings.TopP > 0 then
+        LBody.AddPair('top_p', TJSONNumber.Create(ASettings.TopP));
+}
+      if Trim(ASettings.ApiVersion) <> '' then
+        LVersion := ASettings.ApiVersion
+      else
+        LVersion := AnthropicVersionHeader;
+
+      LUrl := NormalizeBaseURL(ASettings.BaseURL, GetDefaultBaseURL) + '/v1/messages';
+
+      LRaw := ExecutePost(
+        LUrl,
+        LBody.ToJSON,
+        [
+          TNameValuePair.Create('x-api-key', ASettings.ApiKey),
+          TNameValuePair.Create('anthropic-version', LVersion)
+        ],
+        ARequest);
+    finally
+      {$IFDEF DEBUG}
+      // Fonction de debug : écrit la réponse brute dans un fichier
+      TFile.WriteAllText(
+        TPath.Combine(ExtractFilePath(ParamStr(0)), 'claude_debug.txt'),
+        'URL: ' + LUrl + sLineBreak +
+        'BODY: ' + sLineBreak + LBody.ToJSON + sLineBreak +  // à placer avant LBody.Free
+        'RESPONSE: ' + sLineBreak + LRaw,
+        TEncoding.UTF8);
+      {$ENDIF}
+
+      LBody.Free;
+    end;
+
+    LValue := TJSONObject.ParseJSONValue(LRaw);
+    try
+      if not (LValue is TJSONObject) then
+        raise Exception.Create('Invalid response from Claude: ' + Copy(LRaw, 1, 300));
+      LRoot := TJSONObject(LValue);
+
+      LContent := JsonArray(LRoot, 'content');
+      if (not Assigned(LContent)) or (LContent.Count = 0) then
+      begin
+        Result.ErrorText := ExtractErrorText(LRoot);
+        if Result.ErrorText = '' then
+          Result.ErrorText := 'Claude returned no content: ' + Copy(LRaw, 1, 300);
+        raise Exception.Create(Result.ErrorText);
+      end;
+
+      // Premier bloc de type "text"
+      Result.ResponseText := '';
+      for I := 0 to LContent.Count - 1 do
+      begin
+        LItem := LContent.Items[I] as TJSONObject;
+        if JsonString(LItem, 'type') = 'text' then
+        begin
+          Result.ResponseText := JsonString(LItem, 'text');
+          Break;
+        end;
+      end;
+
+      Result.Status := prsSucceeded;
+    finally
+      LValue.Free;
+    end;
+  except
+    on E: Exception do
+    begin
+      Result.Status := prsFailed;
+      Result.ErrorText := E.Message;
+    end;
+  end;
+
+  Result.FinishedAt := Now;
+  Result.DurationMs := MilliSecondsBetween(Result.FinishedAt, Result.StartedAt);
 end;
 
 function TClaudeProvider.GetCapabilities: TAIProviderCapabilities;

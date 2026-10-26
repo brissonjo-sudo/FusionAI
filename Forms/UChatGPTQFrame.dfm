@@ -21,9 +21,8 @@ object Fram_Question: TFram_Question
         Left = 0
         Top = 0
         Width = 427
-        Height = 369
+        Height = 371
         Align = alClient
-        ParentColor = True
         TabOrder = 0
         object pnlTop: TPanel
           Left = 1
@@ -153,7 +152,7 @@ object Fram_Question: TFram_Question
           Left = 1
           Top = 45
           Width = 425
-          Height = 323
+          Height = 325
           Align = alClient
           BevelOuter = bvNone
           TabOrder = 1
@@ -172,45 +171,28 @@ object Fram_Question: TFram_Question
             Left = 0
             Top = 117
             Width = 425
-            Height = 206
+            Height = 208
             Align = alClient
             TabOrder = 0
             object pgcAnswers: TPageControl
               Left = 1
               Top = 1
               Width = 423
-              Height = 204
-              ActivePage = tsChatGPTAnswer
+              Height = 206
+              ActivePage = tsOllamaAnswer
               Align = alClient
-              Font.Charset = DEFAULT_CHARSET
-              Font.Color = clWindow
-              Font.Height = -11
-              Font.Name = 'Segoe UI'
-              Font.Style = []
               HotTrack = True
-              ParentFont = False
               TabOrder = 0
               OnChange = pgcAnswersChange
               object tsChatGPTAnswer: TTabSheet
                 Caption = 'Gemini'
-                Font.Charset = DEFAULT_CHARSET
-                Font.Color = clWindowText
-                Font.Height = -8
-                Font.Name = 'Segoe UI'
-                Font.Style = []
-                ParentFont = False
                 object mmoAnswer: TMemo
                   Left = 0
                   Top = 0
                   Width = 415
-                  Height = 176
+                  Height = 178
                   Align = alClient
-                  Font.Charset = DEFAULT_CHARSET
-                  Font.Color = clWindowText
-                  Font.Height = -12
-                  Font.Name = 'Consolas'
-                  Font.Style = [fsBold]
-                  ParentFont = False
+                  ParentColor = True
                   ReadOnly = True
                   ScrollBars = ssVertical
                   TabOrder = 0
@@ -223,7 +205,7 @@ object Fram_Question: TFram_Question
                   Left = 0
                   Top = 0
                   Width = 415
-                  Height = 176
+                  Height = 178
                   Align = alClient
                   ReadOnly = True
                   ScrollBars = ssVertical
@@ -237,11 +219,12 @@ object Fram_Question: TFram_Question
                   Left = 0
                   Top = 0
                   Width = 415
-                  Height = 176
+                  Height = 178
                   Align = alClient
                   ReadOnly = True
                   ScrollBars = ssVertical
                   TabOrder = 0
+                  ExplicitTop = 4
                 end
               end
             end
@@ -259,15 +242,9 @@ object Fram_Question: TFram_Question
             object Lbl_Question: TLabel
               Left = 7
               Top = 3
-              Width = 53
-              Height = 15
+              Width = 47
+              Height = 13
               Caption = 'Question:'
-              Font.Charset = DEFAULT_CHARSET
-              Font.Color = clWindowText
-              Font.Height = -12
-              Font.Name = 'Segoe UI'
-              Font.Style = [fsBold]
-              ParentFont = False
             end
             object mmoQuestion: TMemo
               Left = 5
@@ -276,12 +253,6 @@ object Fram_Question: TFram_Question
               Height = 89
               Hint = 'Type a question and press Ctrl + Enter'
               Anchors = [akLeft, akTop, akRight, akBottom]
-              Font.Charset = DEFAULT_CHARSET
-              Font.Color = clWindowText
-              Font.Height = -13
-              Font.Name = 'Segoe UI'
-              Font.Style = [fsBold]
-              ParentFont = False
               ParentShowHint = False
               ScrollBars = ssVertical
               ShowHint = True
@@ -317,13 +288,13 @@ object Fram_Question: TFram_Question
         Left = 0
         Top = 140
         Width = 427
-        Height = 229
+        Height = 231
         Align = alClient
         TabOrder = 1
         object splClassViewResult: TSplitter
           Left = 238
           Top = 1
-          Height = 227
+          Height = 229
           Align = alRight
           Visible = False
           ExplicitLeft = 216
@@ -335,7 +306,7 @@ object Fram_Question: TFram_Question
           Left = 4
           Top = 4
           Width = 231
-          Height = 221
+          Height = 223
           Align = alClient
           Font.Charset = ANSI_CHARSET
           Font.Color = clWindowText
@@ -352,7 +323,7 @@ object Fram_Question: TFram_Question
           Left = 241
           Top = 1
           Width = 185
-          Height = 227
+          Height = 229
           Align = alRight
           ReadOnly = True
           ScrollBars = ssVertical
@@ -415,7 +386,7 @@ object Fram_Question: TFram_Question
             Left = 7
             Top = 8
             Width = 202
-            Height = 23
+            Height = 21
             Anchors = [akLeft, akTop, akRight]
             TabOrder = 1
             OnChange = Edt_SearchChange
@@ -449,14 +420,14 @@ object Fram_Question: TFram_Question
         Left = 0
         Top = 188
         Width = 427
-        Height = 181
+        Height = 183
         Align = alClient
         TabOrder = 1
         object mmoHistoryDetail: TMemo
           Left = 1
           Top = 1
           Width = 425
-          Height = 179
+          Height = 181
           Align = alClient
           ReadOnly = True
           ScrollBars = ssBoth
@@ -532,6 +503,7 @@ object Fram_Question: TFram_Question
       FieldName = 'HID'
       Origin = 'HID'
       ProviderFlags = [pfInWhere, pfInKey]
+      ReadOnly = True
     end
     object FDQryHistoryQuestion: TWideMemoField
       Alignment = taCenter

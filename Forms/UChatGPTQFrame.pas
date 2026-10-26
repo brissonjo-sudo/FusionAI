@@ -757,7 +757,7 @@ var
   LvPosition, LvOffset: Integer;
   LvHlText, LvDisplayText: string;
 begin
-  LvPosition := 0;
+//  LvPosition := 0;
   LvDisplayText := AField.AsString;
   LvPosition := XPos(LowerCase(AFilterText), LowerCase(LvDisplayText), ACaseSensitive);
 
