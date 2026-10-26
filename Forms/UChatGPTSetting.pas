@@ -981,22 +981,22 @@ Var
   ITS: IOTAIDEThemingServices;
 {$ELSE}
   ITS: IOTAIDEThemingServices250;
-{$IFEND}
-{$IFEND}
+{$ENDIF}
+{$ENDIF}
 begin
 {$IF CompilerVersion >= 32.0}
 {$IF CompilerVersion > 33.0}
   If Supports(BorlandIDEServices, IOTAIDEThemingServices, ITS) Then
 {$ELSE}
   If Supports(BorlandIDEServices, IOTAIDEThemingServices250, ITS) Then
-{$IFEND}
+{$ENDIF}
     If ITS.IDEThemingEnabled Then
     begin
       ITS.RegisterFormClass(AFormClass);
       If Assigned(Component) Then
         ITS.ApplyTheme(Component);
     end;
-{$IFEND}
+{$ENDIF}
 end;
 
 function TSingletonSettingObj.TryFindQuestion(ACaption: string; var AQuestion: string): Integer;

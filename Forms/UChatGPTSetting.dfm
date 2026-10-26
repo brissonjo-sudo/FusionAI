@@ -12,9 +12,11 @@ object Frm_Setting: TFrm_Setting
   Font.Name = 'Segoe UI'
   Font.Style = []
   KeyPreview = True
+  OldCreateOrder = True
   Position = poMainFormCenter
   OnCreate = FormCreate
   OnKeyDown = FormKeyDown
+  PixelsPerInch = 96
   TextHeight = 15
   object pgcSetting: TPageControl
     Left = 0
@@ -83,7 +85,7 @@ object Frm_Setting: TFrm_Setting
             object lbl_5: TLabel
               Left = 220
               Top = 140
-              Width = 69
+              Width = 70
               Height = 15
               Caption = 'Temperature:'
               Visible = False
@@ -149,8 +151,8 @@ object Frm_Setting: TFrm_Setting
               Width = 28
               Height = 23
               Alignment = taCenter
-              EditLabel.Width = 102
-              EditLabel.Height = 23
+              EditLabel.Width = 103
+              EditLabel.Height = 15
               EditLabel.Caption = 'Request Timeout(s)'
               LabelPosition = lpLeft
               LabelSpacing = 5
@@ -234,11 +236,10 @@ object Frm_Setting: TFrm_Setting
                 Width = 318
                 Height = 23
                 EditLabel.Width = 55
-                EditLabel.Height = 23
+                EditLabel.Height = 15
                 EditLabel.Caption = 'Location:  '
                 LabelPosition = lpLeft
                 TabOrder = 1
-                Text = ''
                 OnChange = edt_UrlChange
               end
               object Btn_HistoryPathBuilder: TButton
@@ -290,11 +291,10 @@ object Frm_Setting: TFrm_Setting
                 Width = 318
                 Height = 23
                 EditLabel.Width = 28
-                EditLabel.Height = 23
+                EditLabel.Height = 15
                 EditLabel.Caption = 'Host:'
                 LabelPosition = lpLeft
                 TabOrder = 0
-                Text = ''
                 OnChange = edt_UrlChange
               end
               object lbEdt_ProxyPort: TLabeledEdit
@@ -303,12 +303,11 @@ object Frm_Setting: TFrm_Setting
                 Width = 66
                 Height = 23
                 EditLabel.Width = 25
-                EditLabel.Height = 23
+                EditLabel.Height = 15
                 EditLabel.Caption = 'Port:'
                 LabelPosition = lpLeft
                 NumbersOnly = True
                 TabOrder = 1
-                Text = ''
                 OnChange = edt_UrlChange
               end
               object chk_ProxyActive: TCheckBox
@@ -326,11 +325,10 @@ object Frm_Setting: TFrm_Setting
                 Width = 138
                 Height = 23
                 EditLabel.Width = 58
-                EditLabel.Height = 23
+                EditLabel.Height = 15
                 EditLabel.Caption = 'UserName:'
                 LabelPosition = lpLeft
                 TabOrder = 3
-                Text = ''
                 OnChange = edt_UrlChange
               end
               object lbEdt_ProxyPassword: TLabeledEdit
@@ -339,11 +337,10 @@ object Frm_Setting: TFrm_Setting
                 Width = 138
                 Height = 23
                 EditLabel.Width = 53
-                EditLabel.Height = 23
+                EditLabel.Height = 15
                 EditLabel.Caption = 'Password:'
                 LabelPosition = lpLeft
                 TabOrder = 4
-                Text = ''
                 OnChange = edt_UrlChange
               end
             end
@@ -422,6 +419,10 @@ object Frm_Setting: TFrm_Setting
     object tsPreDefinedQuestions: TTabSheet
       Caption = 'PreDefined Questions'
       ImageIndex = 1
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object pnlPredefinedQ: TPanel
         Left = 0
         Top = 0
@@ -482,6 +483,10 @@ object Frm_Setting: TFrm_Setting
     object tsOtherAiServices: TTabSheet
       Caption = 'Other AI Services'
       ImageIndex = 2
+      ExplicitLeft = 0
+      ExplicitTop = 0
+      ExplicitWidth = 0
+      ExplicitHeight = 0
       object pnlOtherAIMain: TPanel
         Left = 0
         Top = 0
@@ -523,13 +528,12 @@ object Frm_Setting: TFrm_Setting
               Width = 330
               Height = 23
               EditLabel.Width = 43
-              EditLabel.Height = 23
+              EditLabel.Height = 15
               EditLabel.Caption = 'API Key:'
               LabelPosition = lpLeft
               LabelSpacing = 5
               PasswordChar = '*'
               TabOrder = 1
-              Text = ''
             end
             object lbEdt_GeminiBaseURL: TLabeledEdit
               Left = 74
@@ -537,12 +541,11 @@ object Frm_Setting: TFrm_Setting
               Width = 330
               Height = 23
               EditLabel.Width = 51
-              EditLabel.Height = 23
+              EditLabel.Height = 15
               EditLabel.Caption = 'Base URL:'
               LabelPosition = lpLeft
               LabelSpacing = 5
               TabOrder = 2
-              Text = ''
             end
           end
         end
@@ -579,13 +582,12 @@ object Frm_Setting: TFrm_Setting
               Width = 330
               Height = 23
               EditLabel.Width = 43
-              EditLabel.Height = 23
+              EditLabel.Height = 15
               EditLabel.Caption = 'API Key:'
               LabelPosition = lpLeft
               LabelSpacing = 5
               PasswordChar = '*'
               TabOrder = 1
-              Text = ''
             end
             object lbEdt_ClaudeBaseURL: TLabeledEdit
               Left = 74
@@ -593,12 +595,11 @@ object Frm_Setting: TFrm_Setting
               Width = 330
               Height = 23
               EditLabel.Width = 51
-              EditLabel.Height = 23
+              EditLabel.Height = 15
               EditLabel.Caption = 'Base URL:'
               LabelPosition = lpLeft
               LabelSpacing = 5
               TabOrder = 2
-              Text = ''
             end
           end
         end
