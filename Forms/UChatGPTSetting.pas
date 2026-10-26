@@ -1478,9 +1478,8 @@ begin
 
   lbEdt_Timeout.LabelPosition := lpAbove;
   lbEdt_Timeout.SetBounds(211, 286, 196, 23);
+  // LabelPosition places the label; EditLabel.Left/Top are read-only in Delphi 10.2 (E2129).
   lbEdt_Timeout.EditLabel.Caption := CaptionRequestTimeout;
-  lbEdt_Timeout.EditLabel.Left := 211;
-  lbEdt_Timeout.EditLabel.Top := 270;
 end;
 
 procedure TFrm_Setting.ConfigureOtherProviderLayout;
