@@ -184,6 +184,8 @@ type
     procedure ApplyTimeoutState;
     function TryGetSelectedClassSource(out AClassName, AClassSource: string; ASilent: Boolean = False): Boolean;
     procedure ShowClassSelectionUnavailable;
+  protected
+    procedure CreateWnd; override;
   public
     destructor Destroy; override;
     procedure InitialFrame;
@@ -212,6 +214,15 @@ const
   CaptionProviderClaude = 'Claude';
   CaptionProviderOllama = 'Ollama';
   CaptionProviderChatGPT = 'ChatGPT';
+
+procedure TFram_Question.CreateWnd;
+begin
+  inherited;
+  // The window handle can be recreated while a request runs (docking, theme change):
+  // keep the coordinator posting to the live handle, or the answers would be dropped.
+  if Assigned(FCoordinator) then
+    FCoordinator.TargetHandle := Handle;
+end;
 
 destructor TFram_Question.Destroy;
 begin
