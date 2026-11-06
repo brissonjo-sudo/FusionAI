@@ -174,6 +174,7 @@ begin
 
   LTimeoutSeconds := EnsureRange(LTimeoutSeconds, CMinRequestTimeoutSeconds, CMaxRequestTimeoutSeconds);
   Result.OnReceiveData := ARequest.ReceiveData;
+  Result.HandleRedirects := False; // never replay the API key against a redirect target
   Result.ConnectionTimeout := Min(10, LTimeoutSeconds) * 1000;
   Result.ResponseTimeout := LTimeoutSeconds * 1000;
 
