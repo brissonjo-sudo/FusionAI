@@ -795,7 +795,9 @@ begin
           if ValueExists('ChatGPTMaxToken') then
           begin
             FMaxToken := ReadInteger('ChatGPTMaxToken');
-            if FMaxToken <= 0 then
+            // Keep stored values inside the bounds ValidateInputs enforces, so a legacy value
+            // never blocks Save while the ChatGPT fields are disabled.
+            if FMaxToken < 128 then
               FMaxToken := DefaultMaxToken;
           end
           else
@@ -804,7 +806,7 @@ begin
           if ValueExists('ChatGPTTemperature') then
           begin
             FTemperature := ReadInteger('ChatGPTTemperature');
-            if FTemperature <= -1 then
+            if (FTemperature < -1) or (FTemperature > 2) then // -1 means "omit", keep it
               FTemperature := DefaultTemperature;
           end
           else
@@ -880,6 +882,8 @@ begin
             FTimeOut := ReadInteger('ChatGPTTimeOut')
           else
             FTimeOut := CDefaultRequestTimeoutSeconds;
+          if (FTimeOut < CMinRequestTimeoutSeconds) or (FTimeOut > CMaxRequestTimeoutSeconds) then
+            FTimeOut := CDefaultRequestTimeoutSeconds; // 0 used to mean "default"
 
           if ValueExists(CMainFormLastQuestionValueName) then
             FMainFormLastQuestion := ReadString(CMainFormLastQuestionValueName).Trim

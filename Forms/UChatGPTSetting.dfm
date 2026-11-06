@@ -124,7 +124,6 @@ object Frm_Setting: TFrm_Setting
               Top = 136
               Width = 122
               Height = 23
-              NumbersOnly = True
               TabOrder = 3
               Text = '0'
               Visible = False
