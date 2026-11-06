@@ -142,7 +142,9 @@ Les anciennes valeurs en clair restent lisibles pour la migration ; une copie da
 l'ancienne racine `HKCU\SOFTWARE\ChatGPTWizard` ou une sauvegarde n'est pas effacée.
 Ne pas réutiliser cette configuration chiffrée avec un autre profil Windows : une
 valeur illisible est laissée vide, les réglages s'ouvrent avec un avertissement qui la
-nomme, et le **Save** suivant la remplace. Il faut alors la ressaisir. DPAPI
+nomme, et le **Save** suivant la remplace. Il faut alors la ressaisir. Un retour à
+une version antérieure du plugin après un **Save** envoie les valeurs chiffrées telles
+quelles (erreurs 401) : ressaisir les clés dans ce cas aussi. DPAPI
 ne protège pas contre un programme exécuté avec les mêmes droits utilisateur.
 L'historique et les journaux restent des fichiers locaux non chiffrés contenant du
 code et des prompts lorsque ces fonctions sont activées.
@@ -154,7 +156,7 @@ le streaming et les reprises automatiques ne sont pas ajoutés.
 
 ## Vérifications effectuées ici
 
-- 5 tests Python du **simulateur** : formes JSON, catalogues, paramètres rejetés,
+- 6 tests Python du **simulateur** : formes JSON, catalogues, paramètres rejetés,
   troncature et erreur HTTP.
 - Contrôle de whitespace avec `git diff --check` et lecture XML du projet.
 - Vérification des références aux unités ajoutées dans le package et le projet.

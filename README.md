@@ -155,7 +155,7 @@ Then run the `Ask` action from the editor popup menu or use its shortcut.
 - Refactor Code
 - Convert to Assembly
 
-The response is previewed before insertion, then added as line comments after the selected code or at the cursor.
+The response is previewed before insertion, then added as `//` line comments on the line after the selection or the cursor line.
 
 ### Context Menu
 
@@ -209,10 +209,11 @@ Depending on the provider, you can configure:
 - model
 - timeout
 - max tokens
-- temperature
-- top-p
+- temperature and top-p (not for Claude: current Claude models reject sampling fields, so they are not sent)
 - top-k
 - API version fields when required by the provider
+
+API keys and the proxy password are stored encrypted with Windows DPAPI for the current user. A configuration saved under one Windows profile cannot be reused under another; enter the keys again in that case.
 
 ### ChatGPT
 
