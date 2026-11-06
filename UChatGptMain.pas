@@ -175,8 +175,6 @@ begin
 end;
 
 procedure RemoveAferUnInstall;
-var
-  LvRootMenu: TMainMenu;
 begin
   if Assigned(FFusionAIDockForm) then
   begin
@@ -184,9 +182,8 @@ begin
     FreeAndNil(FFusionAIDockForm);
   end;
 
-  LvRootMenu := (BorlandIDEServices as INTAServices).MainMenu;
-  LvRootMenu.Items.Delete(TSingletonSettingObj.Instance.RootMenuIndex);
-
+  // The root menu item is freed by TChatGptMenuWizard.Destroyed (RemoveWizard), which
+  // detaches it. Deleting by a stored index could remove another expert's menu.
   if FMainMenuIndex <> WizardFail then
     (BorlandIDEServices as IOTAWizardServices).RemoveWizard(FMainMenuIndex);
 
@@ -408,9 +405,9 @@ begin
     FRoot.Add(FAboutMenu);
   end;
 
-  if not Assigned((BorlandIDEServices as INTAServices).MainMenu.Items.Find(CRootMenuName)) then
+  LvMainMenu := (BorlandIDEServices as INTAServices).MainMenu;
+  if not Assigned(LvMainMenu.Items.Find(CRootMenuName)) then
   begin
-    LvMainMenu := (BorlandIDEServices as INTAServices).MainMenu;
     LvMainMenu.Items.Insert(LvMainMenu.Items.Count - 1, FRoot);
     LoadSubMenuIcons(LvMainMenu);
   end;
