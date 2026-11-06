@@ -146,6 +146,9 @@
         <DCCReference Include="Utils\UHistory.pas"/>
         <DCCReference Include="Utils\UConsts.pas"/>
         <DCCReference Include="Utils\UAICommon.pas"/>
+        <DCCReference Include="Utils\UAIProtocol.pas"/>
+        <DCCReference Include="Utils\UAIText.pas"/>
+        <DCCReference Include="Utils\UAISecrets.pas"/>
         <DCCReference Include="Utils\UAIProviders.pas"/>
         <DCCReference Include="Utils\UAIRequestCoordinator.pas"/>
         <DCCReference Include="Utils\UAIHistory.pas"/>

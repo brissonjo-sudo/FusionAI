@@ -12,7 +12,7 @@ unit UPascalLexerTypes;
 
 interface
 
-uses SysUtils, TypInfo;
+uses System.SysUtils, System.TypInfo;
 
 {$INCLUDE ParserDefines.inc}
 

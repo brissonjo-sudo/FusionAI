@@ -360,9 +360,24 @@ begin
 end;
 
 destructor TCpMenuHook.Destroy;
+var
+  I, J: Integer;
+  LvMenu: TPopupMenu;
 begin
+  // The items belong to the IDE's popup menu and outlive this package. Remove them
+  // while their handlers still exist, otherwise a click after uninstall runs unloaded code.
+  for I := FMenuList.Count - 1 downto 0 do
+  begin
+    LvMenu := TMenuObj(FMenuList[I]).Menu;
+    for J := 0 to MenuItemDefCount - 1 do
+      DoRemoveMenuItem(LvMenu, MenuItemDefs[J].Name);
+    for J := LvMenu.Items.Count - 1 downto 0 do
+      if LvMenu.Items[J].Tag = csMenuItemTag then
+        LvMenu.Items[J].Free;
+    LvMenu.RemoveFreeNotification(Self);
+  end;
   FMenuItemDefList.Free;
-  FMenuList.Free;
+  FMenuList.Free; // TMenuObj.Destroy restores the menu's original OnPopup
   inherited;
 end;
 

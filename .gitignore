@@ -17,3 +17,6 @@ desktop.ini
 *.dres
 *.rc
 *.txt
+# Local regression builds and Python fixtures
+/tests/bin/
+__pycache__/
